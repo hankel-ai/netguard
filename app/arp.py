@@ -3,7 +3,10 @@ import logging
 import subprocess
 import threading
 
-from scapy.all import Ether, ARP, sendp, srp, conf
+from scapy.all import (
+    Ether, ARP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr,
+    ICMPv6NDOptPrefixInfo, sendp, srp, sniff, conf,
+)
 
 from app.config import settings
 
@@ -17,9 +20,11 @@ class ArpBlocker:
         self.interface: str = settings.interface
         self.arp_interval: float = settings.arp_interval
         self.gateway_mac: str | None = None
+        self.gateway_ll_addr: str | None = None  # gateway's IPv6 link-local
         self.target_ip: str | None = None
         self._spoofing: bool = False
         self._spoof_thread: threading.Thread | None = None
+        self._ra_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
     def discover_gateway_mac(self) -> str:
@@ -64,48 +69,73 @@ class ArpBlocker:
         logger.warning("Could not discover target IP")
         return None
 
-    def _add_iptables_rule(self):
-        subprocess.run(
-            [
-                "iptables", "-C", "FORWARD",
-                "-m", "mac", "--mac-source", self.target_mac.upper(),
-                "-j", "DROP",
-            ],
+    def discover_gateway_ipv6_ll(self) -> str | None:
+        """Discover gateway's IPv6 link-local by sniffing for Router Advertisements."""
+        logger.info("Listening for IPv6 Router Advertisement (up to 10s)...")
+        try:
+            pkts = sniff(
+                iface=self.interface,
+                filter="icmp6 and ip6[40] == 134",  # RA type
+                timeout=10,
+                count=1,
+            )
+            if pkts:
+                ra = pkts[0]
+                src_ip = ra[IPv6].src
+                logger.info("Gateway IPv6 link-local: %s", src_ip)
+                return src_ip
+        except Exception as e:
+            logger.warning("Could not sniff RA: %s", e)
+        # Fallback: derive from gateway MAC using EUI-64
+        if self.gateway_mac:
+            ll = self._mac_to_ll(self.gateway_mac)
+            logger.info("Gateway IPv6 link-local (derived from MAC): %s", ll)
+            return ll
+        logger.warning("Could not determine gateway IPv6 link-local")
+        return None
+
+    @staticmethod
+    def _mac_to_ll(mac: str) -> str:
+        """Convert MAC to IPv6 link-local via modified EUI-64."""
+        parts = mac.split(":")
+        # Flip the 7th bit of the first octet
+        parts[0] = f"{int(parts[0], 16) ^ 0x02:02x}"
+        eui64 = f"{parts[0]}{parts[1]}:{parts[2]}ff:fe{parts[3]}:{parts[4]}{parts[5]}"
+        return f"fe80::{eui64}"
+
+    def _add_firewall_rule(self, cmd: str):
+        """Add a FORWARD DROP rule if not already present. cmd is 'iptables' or 'ip6tables'."""
+        mac = self.target_mac.upper()
+        check = subprocess.run(
+            [cmd, "-C", "FORWARD", "-m", "mac", "--mac-source", mac, "-j", "DROP"],
             capture_output=True,
         )
-        # -C returns 0 if rule exists; add only if missing
-        result = subprocess.run(
-            [
-                "iptables", "-C", "FORWARD",
-                "-m", "mac", "--mac-source", self.target_mac.upper(),
-                "-j", "DROP",
-            ],
-            capture_output=True,
-        )
-        if result.returncode != 0:
+        if check.returncode != 0:
             subprocess.run(
-                [
-                    "iptables", "-A", "FORWARD",
-                    "-m", "mac", "--mac-source", self.target_mac.upper(),
-                    "-j", "DROP",
-                ],
+                [cmd, "-A", "FORWARD", "-m", "mac", "--mac-source", mac, "-j", "DROP"],
                 check=True,
             )
-            logger.info("iptables DROP rule added")
+            logger.info("%s DROP rule added", cmd)
 
-    def _remove_iptables_rule(self):
+    def _remove_firewall_rule(self, cmd: str):
+        """Remove all FORWARD DROP rules for target MAC. cmd is 'iptables' or 'ip6tables'."""
+        mac = self.target_mac.upper()
         while True:
             result = subprocess.run(
-                [
-                    "iptables", "-D", "FORWARD",
-                    "-m", "mac", "--mac-source", self.target_mac.upper(),
-                    "-j", "DROP",
-                ],
+                [cmd, "-D", "FORWARD", "-m", "mac", "--mac-source", mac, "-j", "DROP"],
                 capture_output=True,
             )
             if result.returncode != 0:
                 break
-        logger.info("iptables DROP rule(s) removed")
+        logger.info("%s DROP rule(s) removed", cmd)
+
+    def _add_iptables_rule(self):
+        self._add_firewall_rule("iptables")
+        self._add_firewall_rule("ip6tables")
+
+    def _remove_iptables_rule(self):
+        self._remove_firewall_rule("iptables")
+        self._remove_firewall_rule("ip6tables")
 
     def _spoof_loop(self):
         """Continuously send spoofed ARP replies in a background thread."""
@@ -123,6 +153,24 @@ class ArpBlocker:
         while not self._stop_event.is_set():
             sendp(pkt, iface=self.interface, verbose=False)
             self._stop_event.wait(self.arp_interval)
+
+    def _ra_spoof_loop(self):
+        """Send fake Router Advertisements with lifetime=0 to kill target's IPv6 default route."""
+        if not self.gateway_ll_addr:
+            logger.warning("No gateway IPv6 link-local — IPv6 blocking inactive")
+            return
+        # Spoof RA from gateway's link-local with router_lifetime=0
+        pkt = (
+            Ether(dst=self.target_mac, src=self.gateway_mac)
+            / IPv6(src=self.gateway_ll_addr, dst="ff02::1")
+            / ICMPv6ND_RA(routerlifetime=0)
+            / ICMPv6NDOptSrcLLAddr(lladdr=self.gateway_mac)
+        )
+        logger.info("Starting RA spoof loop (gateway_ll=%s)", self.gateway_ll_addr)
+        while not self._stop_event.is_set():
+            sendp(pkt, iface=self.interface, verbose=False)
+            # RAs less frequent than ARP — every 3 seconds is plenty
+            self._stop_event.wait(3.0)
 
     def _send_corrective_arp(self, count: int = 5):
         """Restore correct gateway ARP entry on the target."""
@@ -154,8 +202,11 @@ class ArpBlocker:
         self._stop_event.clear()
         self._spoof_thread = threading.Thread(target=self._spoof_loop, daemon=True)
         self._spoof_thread.start()
+        if self.gateway_ll_addr:
+            self._ra_thread = threading.Thread(target=self._ra_spoof_loop, daemon=True)
+            self._ra_thread.start()
         self._spoofing = True
-        logger.info("Blocking ACTIVE")
+        logger.info("Blocking ACTIVE (IPv4 + IPv6)")
 
     async def unblock(self):
         if not self._spoofing:
@@ -166,10 +217,13 @@ class ArpBlocker:
         if self._spoof_thread:
             self._spoof_thread.join(timeout=5)
             self._spoof_thread = None
+        if self._ra_thread:
+            self._ra_thread.join(timeout=5)
+            self._ra_thread = None
         self._spoofing = False
         self._remove_iptables_rule()
         self._send_corrective_arp()
-        logger.info("Blocking INACTIVE")
+        logger.info("Blocking INACTIVE (IPv4 + IPv6)")
 
     @property
     def is_blocking(self) -> bool:
@@ -179,3 +233,4 @@ class ArpBlocker:
         """Run discovery (call from startup, in a thread)."""
         self.gateway_mac = self.discover_gateway_mac()
         self.target_ip = self.discover_target_ip()
+        self.gateway_ll_addr = self.discover_gateway_ipv6_ll()
