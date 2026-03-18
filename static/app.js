@@ -31,6 +31,14 @@ function esc(s) {
     return d.innerHTML;
 }
 
+function fmt12(time24) {
+    if (!time24) return '';
+    const [h, m] = time24.split(':').map(Number);
+    const suffix = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
+}
+
 // === Tabs ===
 
 document.querySelector('.tabs').addEventListener('click', (e) => {
@@ -92,18 +100,30 @@ function renderTargetCard(t) {
     const displayName = t.hostname || 'Unknown Device';
     const ip = t.target_ip || t.ip || '\u2014';
     const hasOverride = t.override !== 'none';
+    const hasSchedules = t.schedules && t.schedules.length > 0;
+    const hasEnabledSchedules = hasSchedules && t.schedules.some(s => s.enabled);
 
     let scheduleSummary = '';
-    if (t.schedules && t.schedules.length > 0) {
+    if (hasSchedules) {
         const enabled = t.schedules.filter(s => s.enabled);
         if (enabled.length > 0) {
             scheduleSummary = enabled.map(s =>
-                `${DAY_LABELS[s.day_of_week] || s.day_of_week} ${s.start_time}\u2013${s.end_time}`
+                `${DAY_LABELS[s.day_of_week] || s.day_of_week} ${fmt12(s.start_time)}\u2013${fmt12(s.end_time)}`
             ).join(', ');
         } else {
             scheduleSummary = `${t.schedules.length} rule(s), all disabled`;
         }
     }
+
+    let scheduleClass = 'target-schedule';
+    if (hasOverride) {
+        scheduleClass += ' schedule-muted';
+    } else if (hasEnabledSchedules) {
+        scheduleClass += blocked ? ' schedule-red' : ' schedule-green';
+    }
+
+    const blockPressed = t.override === 'block';
+    const unblockPressed = t.override === 'unblock';
 
     return `
     <div class="card target-card" data-id="${t.id}">
@@ -116,16 +136,15 @@ function renderTargetCard(t) {
                 <span class="dot"></span> ${statusText}
             </div>
         </div>
-        ${hasOverride ? `<div class="override-badge">Override: ${t.override}</div>` : ''}
-        <div class="target-schedule" data-action="schedule" data-name="${esc(displayName)}">
+        <div class="${scheduleClass}" data-action="schedule" data-name="${esc(displayName)}">
             ${scheduleSummary
                 ? `<span class="schedule-icon">\u{1F551}</span> ${esc(scheduleSummary)}`
                 : '<span class="schedule-icon">\u{1F551}</span> No schedule \u2014 tap to add'
             }
         </div>
         <div class="target-actions">
-            <button class="btn btn-danger btn-sm" data-action="block">BLOCK</button>
-            <button class="btn btn-success btn-sm" data-action="unblock">UNBLOCK</button>
+            <button class="btn btn-danger btn-sm${blockPressed ? ' btn-pressed' : ''}" data-action="block"${blockPressed ? ' disabled' : ''}>BLOCK</button>
+            <button class="btn btn-success btn-sm${unblockPressed ? ' btn-pressed' : ''}" data-action="unblock"${unblockPressed ? ' disabled' : ''}>UNBLOCK</button>
             ${hasOverride ? '<button class="btn btn-secondary btn-sm" data-action="clear-override">CLEAR</button>' : ''}
             <button class="btn btn-delete btn-sm" data-action="delete" data-name="${esc(displayName)}">\u00d7</button>
         </div>
@@ -190,7 +209,7 @@ async function refreshScheduleModal() {
     list.innerHTML = rules.map(r => `
         <div class="rule-item">
             <span class="rule-label ${r.enabled ? '' : 'disabled'}">
-                ${DAY_LABELS[r.day_of_week] || r.day_of_week} ${r.start_time}\u2013${r.end_time}
+                ${DAY_LABELS[r.day_of_week] || r.day_of_week} ${fmt12(r.start_time)}\u2013${fmt12(r.end_time)}
             </span>
             <div class="rule-actions">
                 <button class="btn btn-sm btn-secondary" data-rule-action="toggle" data-rule-id="${r.id}">${r.enabled ? '\u2611' : '\u2610'}</button>
@@ -362,7 +381,7 @@ async function refreshLog() {
 
     list.innerHTML = logs.slice(0, 30).map(l => {
         const d = new Date(l.timestamp + 'Z');
-        const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
         const who = l.hostname || l.target_mac || '';
         const label = who ? ` [${who}]` : '';
         return `<div class="log-item"><span class="log-time">${time}</span>${label} \u2014 ${l.action} (${l.source})</div>`;
