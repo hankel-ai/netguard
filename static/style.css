@@ -39,6 +39,61 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 
 .dim { color: var(--text-dim); font-size: 0.85rem; }
 
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 4px;
+}
+
+.tab {
+    flex: 1;
+    padding: 10px 8px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tab.active { background: var(--blue); color: #fff; }
+.tab:not(.active):hover { background: rgba(255,255,255,0.05); }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Search */
+.search-bar {
+    margin-bottom: 12px;
+}
+
+.search-bar input {
+    width: 100%;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    border: 1px solid #333;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.search-bar input::placeholder { color: var(--text-dim); }
+.search-bar input:focus { outline: none; border-color: var(--blue); }
+
+/* Scan toolbar */
+.scan-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
 /* Cards */
 .card {
     background: var(--surface);

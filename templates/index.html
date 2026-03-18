@@ -10,36 +10,46 @@
     <div class="container">
         <header>
             <h1>NetGuard</h1>
-            <button class="btn btn-primary btn-sm" onclick="openScanModal()">Scan LAN</button>
         </header>
 
-        <div id="targets-list"></div>
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" data-tab="targets">Targets</button>
+            <button class="tab" data-tab="scan">LAN Devices</button>
+            <button class="tab" data-tab="log">Activity</button>
+        </div>
 
-        <!-- Add Target (manual) -->
-        <section class="card add-target-section">
-            <h2>Add Target Manually</h2>
-            <form id="add-target-form" class="add-target-form">
-                <input type="text" id="add-mac" placeholder="MAC (aa:bb:cc:dd:ee:ff)" required pattern="[0-9a-fA-F:]{17}">
-                <input type="text" id="add-hostname" placeholder="Hostname (optional)">
-                <button type="submit" class="btn btn-primary">Add</button>
-            </form>
-        </section>
-
-        <!-- Activity Log -->
-        <section class="card">
-            <h2>Recent Activity</h2>
-            <div id="log-list"></div>
-        </section>
-    </div>
-
-    <!-- Scan Modal -->
-    <div id="scan-modal" class="modal" hidden>
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>LAN Devices</h2>
-                <button class="btn btn-sm btn-secondary" onclick="closeScanModal()">&times;</button>
+        <!-- Tab: Targets -->
+        <div id="tab-targets" class="tab-content active">
+            <div class="search-bar">
+                <input type="text" id="search-targets" placeholder="Search by hostname, IP, or MAC...">
             </div>
-            <div id="scan-results">Scanning...</div>
+            <div id="targets-list"></div>
+            <section class="card add-target-section">
+                <h2>Add Target Manually</h2>
+                <form id="add-target-form" class="add-target-form">
+                    <input type="text" id="add-mac" placeholder="MAC (aa:bb:cc:dd:ee:ff)" required pattern="[0-9a-fA-F:]{17}">
+                    <input type="text" id="add-hostname" placeholder="Hostname (optional)">
+                    <button type="submit" class="btn btn-primary">Add</button>
+                </form>
+            </section>
+        </div>
+
+        <!-- Tab: LAN Scan -->
+        <div id="tab-scan" class="tab-content">
+            <div class="search-bar">
+                <input type="text" id="search-scan" placeholder="Search by hostname, IP, or MAC...">
+            </div>
+            <div class="scan-toolbar">
+                <span id="scan-status" class="dim">Not scanned yet</span>
+                <button class="btn btn-primary btn-sm" id="btn-scan">Scan Now</button>
+            </div>
+            <div id="scan-list"></div>
+        </div>
+
+        <!-- Tab: Activity Log -->
+        <div id="tab-log" class="tab-content">
+            <div id="log-list"></div>
         </div>
     </div>
 
@@ -48,7 +58,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="schedule-modal-title">Schedule</h2>
-                <button class="btn btn-sm btn-secondary" onclick="closeScheduleModal()">&times;</button>
+                <button class="btn btn-sm btn-secondary" id="btn-close-schedule">&times;</button>
             </div>
             <div id="schedule-rules-list"></div>
             <form id="schedule-form" class="add-rule-form">

@@ -31,19 +31,58 @@ function esc(s) {
     return d.innerHTML;
 }
 
+// === Tabs ===
+
+document.querySelector('.tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab');
+    if (!tab) return;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+});
+
+// === Search ===
+
+function matchesSearch(query, ...fields) {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    return fields.some(f => f && f.toLowerCase().includes(q));
+}
+
+document.getElementById('search-targets').addEventListener('input', () => renderTargets());
+document.getElementById('search-scan').addEventListener('input', () => renderScanList());
+
 // === Targets ===
+
+let _targets = [];
 
 async function refreshTargets() {
     const targets = await api('/api/targets');
     if (!targets || targets._error) return;
+    _targets = targets;
+    renderTargets();
+}
+
+function renderTargets() {
+    const query = document.getElementById('search-targets').value;
     const list = document.getElementById('targets-list');
 
-    if (targets.length === 0) {
-        list.innerHTML = '<div class="card empty">No targets configured. Scan your LAN or add one manually.</div>';
+    const filtered = _targets.filter(t =>
+        matchesSearch(query, t.hostname, t.target_ip || t.ip, t.mac)
+    );
+
+    if (_targets.length === 0) {
+        list.innerHTML = '<div class="card empty">No targets configured. Switch to LAN Devices to scan and add.</div>';
         return;
     }
 
-    list.innerHTML = targets.map(renderTargetCard).join('');
+    if (filtered.length === 0) {
+        list.innerHTML = '<div class="card empty">No targets match your search.</div>';
+        return;
+    }
+
+    list.innerHTML = filtered.map(renderTargetCard).join('');
 }
 
 function renderTargetCard(t) {
@@ -135,6 +174,8 @@ function closeScheduleModal() {
     _scheduleTargetId = null;
 }
 
+document.getElementById('btn-close-schedule').addEventListener('click', closeScheduleModal);
+
 async function refreshScheduleModal() {
     if (!_scheduleTargetId) return;
     const rules = await api(`/api/targets/${_scheduleTargetId}/schedules`);
@@ -159,7 +200,6 @@ async function refreshScheduleModal() {
     `).join('');
 }
 
-// Event delegation for schedule rules
 document.getElementById('schedule-rules-list').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-rule-action]');
     if (!btn) return;
@@ -189,29 +229,61 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
     await refreshTargets();
 });
 
-// === LAN Scan Modal ===
+// === LAN Scan Tab ===
 
 let _scanResults = [];
+let _scanning = false;
 
-async function openScanModal() {
-    document.getElementById('scan-modal').hidden = false;
-    document.getElementById('scan-results').innerHTML = '<p class="dim">Scanning network... this may take a moment.</p>';
+document.getElementById('btn-scan').addEventListener('click', doScan);
+
+async function doScan() {
+    if (_scanning) return;
+    _scanning = true;
+    const btn = document.getElementById('btn-scan');
+    const status = document.getElementById('scan-status');
+    btn.disabled = true;
+    btn.textContent = 'Scanning...';
+    status.textContent = 'Scanning network...';
+    document.getElementById('scan-list').innerHTML = '';
+
     const devices = await api('/api/scan', 'POST');
+    _scanning = false;
+    btn.disabled = false;
+    btn.textContent = 'Scan Now';
+
     if (!devices || devices._error) {
-        document.getElementById('scan-results').innerHTML = '<p class="dim">Scan failed. Try again.</p>';
+        status.textContent = 'Scan failed. Try again.';
         return;
     }
+
     _scanResults = devices;
-    renderScanResults();
+    const count = devices.length;
+    const added = devices.filter(d => d.is_target).length;
+    status.textContent = `${count} device${count !== 1 ? 's' : ''} found (${added} already added)`;
+    renderScanList();
 }
 
-function renderScanResults() {
-    const el = document.getElementById('scan-results');
+function renderScanList() {
+    const query = document.getElementById('search-scan').value;
+    const el = document.getElementById('scan-list');
+
     if (_scanResults.length === 0) {
-        el.innerHTML = '<p class="dim">No devices found.</p>';
+        el.innerHTML = '<div class="card empty">No devices. Hit "Scan Now" to discover devices on your network.</div>';
         return;
     }
-    el.innerHTML = _scanResults.map((d, i) => `
+
+    const filtered = _scanResults.filter(d =>
+        matchesSearch(query, d.hostname, d.ip, d.mac)
+    );
+
+    if (filtered.length === 0) {
+        el.innerHTML = '<div class="card empty">No devices match your search.</div>';
+        return;
+    }
+
+    el.innerHTML = filtered.map((d, _) => {
+        const realIdx = _scanResults.indexOf(d);
+        return `
         <div class="scan-device ${d.is_target ? 'already-added' : ''}">
             <div class="scan-device-info">
                 <div class="scan-device-name">${d.hostname ? esc(d.hostname) : '<em>Unknown</em>'}</div>
@@ -219,14 +291,14 @@ function renderScanResults() {
             </div>
             ${d.is_target
                 ? '<span class="dim">Added</span>'
-                : `<button class="btn btn-primary btn-sm" data-scan-idx="${i}">Add</button>`
+                : `<button class="btn btn-primary btn-sm" data-scan-idx="${realIdx}">Add</button>`
             }
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
 // Event delegation for scan results
-document.getElementById('scan-results').addEventListener('click', async (e) => {
+document.getElementById('scan-list').addEventListener('click', async (e) => {
     const btn = e.target.closest('[data-scan-idx]');
     if (!btn) return;
     const idx = parseInt(btn.dataset.scanIdx);
@@ -236,24 +308,17 @@ document.getElementById('scan-results').addEventListener('click', async (e) => {
     btn.disabled = true;
     btn.textContent = 'Adding...';
     const result = await api('/api/targets', 'POST', {
-        mac: d.mac,
-        ip: d.ip || null,
-        hostname: d.hostname || null,
+        mac: d.mac, ip: d.ip || null, hostname: d.hostname || null,
     });
     if (result && !result._error && result.ok) {
         d.is_target = true;
-        renderScanResults();
+        renderScanList();
         await refreshTargets();
         await refreshLog();
     } else {
         btn.textContent = result?.error || 'Failed';
-        btn.disabled = true;
     }
 });
-
-function closeScanModal() {
-    document.getElementById('scan-modal').hidden = true;
-}
 
 // === Manual Add ===
 
@@ -295,7 +360,7 @@ async function refreshLog() {
         return;
     }
 
-    list.innerHTML = logs.slice(0, 20).map(l => {
+    list.innerHTML = logs.slice(0, 30).map(l => {
         const d = new Date(l.timestamp + 'Z');
         const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const who = l.hostname || l.target_mac || '';
