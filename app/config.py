@@ -2,7 +2,6 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    target_mac: str
     gateway_ip: str = "192.168.1.1"
     interface: str = "eth0"
     auth_password: str

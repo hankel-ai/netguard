@@ -4,24 +4,32 @@ from app.config import settings
 _db: aiosqlite.Connection | None = None
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    ip TEXT,
+    hostname TEXT,
+    is_blocking INTEGER NOT NULL DEFAULT 0,
+    override TEXT NOT NULL DEFAULT 'none',
+    last_seen TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS schedule_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_id INTEGER NOT NULL REFERENCES targets(id) ON DELETE CASCADE,
     day_of_week TEXT NOT NULL,
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS state (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp TEXT NOT NULL DEFAULT (datetime('now')),
     action TEXT NOT NULL,
-    source TEXT NOT NULL
+    source TEXT NOT NULL,
+    target_id INTEGER
 );
 """
 
@@ -31,6 +39,7 @@ async def get_db() -> aiosqlite.Connection:
     if _db is None:
         _db = await aiosqlite.connect(settings.db_path)
         _db.row_factory = aiosqlite.Row
+        await _db.execute("PRAGMA foreign_keys = ON")
         await _db.executescript(SCHEMA)
         await _db.commit()
     return _db
@@ -43,26 +52,80 @@ async def close_db():
         _db = None
 
 
-async def get_state(key: str, default: str = "") -> str:
+# --- Targets ---
+
+async def get_all_targets() -> list[dict]:
     db = await get_db()
-    cursor = await db.execute("SELECT value FROM state WHERE key = ?", (key,))
+    cursor = await db.execute("SELECT * FROM targets ORDER BY id")
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_target(target_id: int) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM targets WHERE id = ?", (target_id,))
     row = await cursor.fetchone()
-    return row["value"] if row else default
+    return dict(row) if row else None
 
 
-async def set_state(key: str, value: str):
+async def get_target_by_mac(mac: str) -> dict | None:
     db = await get_db()
-    await db.execute(
-        "INSERT INTO state (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
-        (key, value, value),
+    cursor = await db.execute("SELECT * FROM targets WHERE mac = ? COLLATE NOCASE", (mac,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+async def add_target(mac: str, ip: str | None = None, hostname: str | None = None) -> int:
+    db = await get_db()
+    cursor = await db.execute(
+        "INSERT INTO targets (mac, ip, hostname) VALUES (?, ?, ?)",
+        (mac.lower(), ip, hostname),
     )
+    await db.commit()
+    return cursor.lastrowid
+
+
+async def remove_target(target_id: int):
+    db = await get_db()
+    await db.execute("DELETE FROM targets WHERE id = ?", (target_id,))
     await db.commit()
 
 
-async def add_log(action: str, source: str):
+async def update_target(target_id: int, **fields):
+    db = await get_db()
+    if not fields:
+        return
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [target_id]
+    await db.execute(f"UPDATE targets SET {set_clause} WHERE id = ?", values)
+    await db.commit()
+
+
+# --- Schedules ---
+
+async def get_schedules_for_target(target_id: int) -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM schedule_rules WHERE target_id = ? ORDER BY id",
+        (target_id,),
+    )
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_schedule(rule_id: int) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM schedule_rules WHERE id = ?", (rule_id,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None
+
+
+# --- Audit Log ---
+
+async def add_log(action: str, source: str, target_id: int | None = None):
     db = await get_db()
     await db.execute(
-        "INSERT INTO audit_log (action, source) VALUES (?, ?)",
-        (action, source),
+        "INSERT INTO audit_log (action, source, target_id) VALUES (?, ?, ?)",
+        (action, source, target_id),
     )
     await db.commit()

@@ -1,14 +1,13 @@
 import asyncio
 import logging
-import signal
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.arp import ArpBlocker
-from app.database import get_state, set_state, close_db, add_log
-from app.routes.api import router as api_router, set_blocker
+from app.arp import BlockerManager
+from app.database import get_all_targets, update_target, close_db, add_log
+from app.routes.api import router as api_router, set_manager
 from app.routes.pages import router as pages_router
 from app.scheduler import init_scheduler, stop_scheduler
 
@@ -18,37 +17,38 @@ logging.basicConfig(
 )
 logger = logging.getLogger("netguard")
 
-blocker = ArpBlocker()
+manager = BlockerManager()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     logger.info("NetGuard starting up...")
-    await asyncio.to_thread(blocker.init)
-    set_blocker(blocker)
+    await asyncio.to_thread(manager.init)
+    set_manager(manager)
 
-    # Restore previous state
-    was_blocking = await get_state("is_blocking", "0")
-    override = await get_state("override", "none")
-    if was_blocking == "1" or override == "block":
-        logger.info("Restoring previous BLOCK state")
-        await blocker.block()
-        await set_state("is_blocking", "1")
-        await add_log("block restored on startup", "system")
+    # Restore all targets from DB
+    targets = await get_all_targets()
+    for t in targets:
+        blocker = await asyncio.to_thread(manager.add_target, t["id"], t["mac"])
+        if t["is_blocking"] == 1 or t["override"] == "block":
+            logger.info("Restoring BLOCK for target %d (%s)", t["id"], t["mac"])
+            await blocker.block()
+            await update_target(t["id"], is_blocking=1)
+            await add_log("block restored on startup", "system", target_id=t["id"])
 
-    init_scheduler(blocker)
-    logger.info("NetGuard ready")
+    init_scheduler(manager)
+    logger.info("NetGuard ready (%d targets loaded)", len(targets))
 
     yield
 
-    # Shutdown: always unblock
-    logger.info("NetGuard shutting down — unblocking...")
+    # Shutdown: always unblock all
+    logger.info("NetGuard shutting down — unblocking all...")
     stop_scheduler()
-    await blocker.unblock()
-    await set_state("is_blocking", "0")
-    await set_state("override", "none")
-    await add_log("unblocked on shutdown", "system")
+    await manager.shutdown()
+    for t in await get_all_targets():
+        await update_target(t["id"], is_blocking=0, override="none")
+    await add_log("all unblocked on shutdown", "system")
     await close_db()
     logger.info("NetGuard stopped cleanly")
 

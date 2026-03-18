@@ -8,28 +8,50 @@
 </head>
 <body>
     <div class="container">
-        <h1>NetGuard</h1>
+        <header>
+            <h1>NetGuard</h1>
+            <button class="btn btn-primary btn-sm" onclick="openScanModal()">Scan LAN</button>
+        </header>
 
-        <section class="status-section">
-            <div id="status-indicator" class="status-indicator unblocked">
-                <span class="dot"></span>
-                <span id="status-text">LOADING...</span>
-            </div>
-            <div id="override-badge" class="override-badge" hidden>Manual override active</div>
-            <div class="controls">
-                <button id="btn-block" class="btn btn-danger" onclick="doAction('block')">BLOCK</button>
-                <button id="btn-unblock" class="btn btn-success" onclick="doAction('unblock')">UNBLOCK</button>
-            </div>
-            <button id="btn-clear" class="btn btn-secondary" hidden onclick="doAction('clear-override')">Clear Override</button>
-            <div class="target-info">
-                <span id="target-info"></span>
-            </div>
+        <div id="targets-list"></div>
+
+        <!-- Add Target (manual) -->
+        <section class="card add-target-section">
+            <h2>Add Target Manually</h2>
+            <form id="add-target-form" class="add-target-form">
+                <input type="text" id="add-mac" placeholder="MAC (aa:bb:cc:dd:ee:ff)" required pattern="[0-9a-fA-F:]{17}">
+                <input type="text" id="add-hostname" placeholder="Hostname (optional)">
+                <button type="submit" class="btn btn-primary">Add</button>
+            </form>
         </section>
 
-        <section class="schedule-section">
-            <h2>Schedule</h2>
-            <div id="schedule-list"></div>
-            <form id="add-rule-form" class="add-rule-form">
+        <!-- Activity Log -->
+        <section class="card">
+            <h2>Recent Activity</h2>
+            <div id="log-list"></div>
+        </section>
+    </div>
+
+    <!-- Scan Modal -->
+    <div id="scan-modal" class="modal" hidden>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>LAN Devices</h2>
+                <button class="btn btn-sm btn-secondary" onclick="closeScanModal()">&times;</button>
+            </div>
+            <div id="scan-results">Scanning...</div>
+        </div>
+    </div>
+
+    <!-- Schedule Modal -->
+    <div id="schedule-modal" class="modal" hidden>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="schedule-modal-title">Schedule</h2>
+                <button class="btn btn-sm btn-secondary" onclick="closeScheduleModal()">&times;</button>
+            </div>
+            <div id="schedule-rules-list"></div>
+            <form id="schedule-form" class="add-rule-form">
                 <select id="rule-day">
                     <option value="weekday">Weekdays</option>
                     <option value="weekend">Weekend</option>
@@ -44,14 +66,9 @@
                 <input type="time" id="rule-start" required>
                 <span>to</span>
                 <input type="time" id="rule-end" required>
-                <button type="submit" class="btn btn-primary">+ Add</button>
+                <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
             </form>
-        </section>
-
-        <section class="log-section">
-            <h2>Recent Activity</h2>
-            <div id="log-list"></div>
-        </section>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>

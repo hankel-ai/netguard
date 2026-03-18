@@ -1,17 +1,37 @@
-from fastapi import APIRouter, Depends, Request, Response
+import asyncio
+
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from app.auth import require_auth, check_password, create_session_cookie, COOKIE_NAME
-from app.database import get_db, get_state, set_state, add_log
-from app.scheduler import evaluate_schedule
+from app.database import (
+    get_all_targets, get_target, get_target_by_mac, add_target as db_add_target,
+    remove_target as db_remove_target, update_target,
+    get_schedules_for_target, get_schedule, add_log, get_db,
+)
+from app.scheduler import evaluate_schedule_for_target
+from app.scanner import full_scan
 
 router = APIRouter(prefix="/api")
+
+_manager = None  # BlockerManager
+
+
+def set_manager(manager):
+    global _manager
+    _manager = manager
 
 
 # --- Models ---
 
 class LoginRequest(BaseModel):
     password: str
+
+
+class AddTargetRequest(BaseModel):
+    mac: str
+    hostname: str | None = None
+    ip: str | None = None
 
 
 class ScheduleCreate(BaseModel):
@@ -26,20 +46,6 @@ class ScheduleUpdate(BaseModel):
     end_time: str | None = None
 
 
-# --- Dependency to get the blocker instance ---
-
-_blocker = None
-
-
-def set_blocker(blocker):
-    global _blocker
-    _blocker = blocker
-
-
-def get_blocker():
-    return _blocker
-
-
 # --- Auth ---
 
 @router.post("/login")
@@ -47,97 +53,116 @@ async def login(body: LoginRequest, response: Response):
     if not check_password(body.password):
         return {"ok": False, "error": "Wrong password"}
     cookie = create_session_cookie()
-    response.set_cookie(
-        COOKIE_NAME,
-        cookie,
-        max_age=86400,
-        httponly=True,
-        samesite="lax",
-    )
+    response.set_cookie(COOKIE_NAME, cookie, max_age=86400, httponly=True, samesite="lax")
     return {"ok": True}
 
 
-# --- Status ---
+# --- Targets ---
 
-@router.get("/status")
-async def status(request: Request):
+@router.get("/targets")
+async def list_targets(request: Request):
     require_auth(request)
-    blocker = get_blocker()
-    override = await get_state("override", "none")
-    return {
-        "is_blocking": blocker.is_blocking,
-        "override": override,
-        "target_mac": blocker.target_mac,
-        "target_ip": blocker.target_ip,
-        "gateway_ip": blocker.gateway_ip,
-        "gateway_mac": blocker.gateway_mac,
-    }
+    targets = await get_all_targets()
+    for t in targets:
+        blocker = _manager.get_blocker(t["id"])
+        t["is_blocking"] = blocker.is_blocking if blocker else False
+        t["target_ip"] = blocker.target_ip if blocker else t.get("ip")
+        t["schedules"] = await get_schedules_for_target(t["id"])
+    return targets
 
 
-# --- Manual Override ---
-
-@router.post("/block")
-async def block(request: Request):
+@router.post("/targets")
+async def add_target(body: AddTargetRequest, request: Request):
     require_auth(request)
-    blocker = get_blocker()
+    existing = await get_target_by_mac(body.mac)
+    if existing:
+        return {"ok": False, "error": "Target with this MAC already exists"}
+    target_id = await db_add_target(body.mac, body.ip, body.hostname)
+    await asyncio.to_thread(_manager.add_target, target_id, body.mac)
+    await add_log(f"target added: {body.mac}", "manual", target_id=target_id)
+    return {"ok": True, "id": target_id}
+
+
+@router.delete("/targets/{target_id}")
+async def delete_target(target_id: int, request: Request):
+    require_auth(request)
+    target = await get_target(target_id)
+    if not target:
+        return {"ok": False, "error": "Not found"}
+    await _manager.remove_target(target_id)
+    await db_remove_target(target_id)
+    await add_log(f"target removed: {target['mac']}", "manual", target_id=target_id)
+    return {"ok": True}
+
+
+# --- Per-target actions ---
+
+@router.post("/targets/{target_id}/block")
+async def block_target(target_id: int, request: Request):
+    require_auth(request)
+    blocker = _manager.get_blocker(target_id)
+    if not blocker:
+        return {"ok": False, "error": "Target not found"}
     await blocker.block()
-    await set_state("is_blocking", "1")
-    await set_state("override", "block")
-    await add_log("blocked", "manual")
-    return {"ok": True, "is_blocking": True}
+    await update_target(target_id, is_blocking=1, override="block")
+    await add_log("blocked", "manual", target_id=target_id)
+    return {"ok": True}
 
 
-@router.post("/unblock")
-async def unblock(request: Request):
+@router.post("/targets/{target_id}/unblock")
+async def unblock_target(target_id: int, request: Request):
     require_auth(request)
-    blocker = get_blocker()
+    blocker = _manager.get_blocker(target_id)
+    if not blocker:
+        return {"ok": False, "error": "Target not found"}
     await blocker.unblock()
-    await set_state("is_blocking", "0")
-    await set_state("override", "unblock")
-    await add_log("unblocked", "manual")
-    return {"ok": True, "is_blocking": False}
+    await update_target(target_id, is_blocking=0, override="unblock")
+    await add_log("unblocked", "manual", target_id=target_id)
+    return {"ok": True}
 
 
-@router.post("/clear-override")
-async def clear_override(request: Request):
+@router.post("/targets/{target_id}/clear-override")
+async def clear_override(target_id: int, request: Request):
     require_auth(request)
-    blocker = get_blocker()
-    await set_state("override", "none")
-    await add_log("override cleared", "manual")
-    # Re-evaluate schedule immediately
-    should_block = await evaluate_schedule()
+    blocker = _manager.get_blocker(target_id)
+    if not blocker:
+        return {"ok": False, "error": "Target not found"}
+    await update_target(target_id, override="none")
+    await add_log("override cleared", "manual", target_id=target_id)
+    # Re-evaluate schedule
+    should_block = await evaluate_schedule_for_target(target_id)
     if should_block and not blocker.is_blocking:
         await blocker.block()
-        await set_state("is_blocking", "1")
-        await add_log("blocked", "schedule")
+        await update_target(target_id, is_blocking=1)
+        await add_log("blocked", "schedule", target_id=target_id)
     elif not should_block and blocker.is_blocking:
         await blocker.unblock()
-        await set_state("is_blocking", "0")
-        await add_log("unblocked", "schedule")
+        await update_target(target_id, is_blocking=0)
+        await add_log("unblocked", "schedule", target_id=target_id)
     return {"ok": True, "is_blocking": blocker.is_blocking}
 
 
 # --- Schedules ---
 
-@router.get("/schedules")
-async def list_schedules(request: Request):
+@router.get("/targets/{target_id}/schedules")
+async def list_schedules(target_id: int, request: Request):
     require_auth(request)
-    db = await get_db()
-    cursor = await db.execute("SELECT * FROM schedule_rules ORDER BY id")
-    rows = await cursor.fetchall()
-    return [dict(r) for r in rows]
+    return await get_schedules_for_target(target_id)
 
 
-@router.post("/schedules")
-async def create_schedule(body: ScheduleCreate, request: Request):
+@router.post("/targets/{target_id}/schedules")
+async def create_schedule(target_id: int, body: ScheduleCreate, request: Request):
     require_auth(request)
     db = await get_db()
     cursor = await db.execute(
-        "INSERT INTO schedule_rules (day_of_week, start_time, end_time) VALUES (?, ?, ?)",
-        (body.day_of_week.lower(), body.start_time, body.end_time),
+        "INSERT INTO schedule_rules (target_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?)",
+        (target_id, body.day_of_week.lower(), body.start_time, body.end_time),
     )
     await db.commit()
-    await add_log(f"schedule added: {body.day_of_week} {body.start_time}-{body.end_time}", "manual")
+    await add_log(
+        f"schedule added: {body.day_of_week} {body.start_time}-{body.end_time}",
+        "manual", target_id=target_id,
+    )
     return {"ok": True, "id": cursor.lastrowid}
 
 
@@ -145,9 +170,7 @@ async def create_schedule(body: ScheduleCreate, request: Request):
 async def update_schedule(rule_id: int, body: ScheduleUpdate, request: Request):
     require_auth(request)
     db = await get_db()
-    # Build dynamic update
-    fields = []
-    values = []
+    fields, values = [], []
     if body.day_of_week is not None:
         fields.append("day_of_week = ?")
         values.append(body.day_of_week.lower())
@@ -168,10 +191,12 @@ async def update_schedule(rule_id: int, body: ScheduleUpdate, request: Request):
 @router.delete("/schedules/{rule_id}")
 async def delete_schedule(rule_id: int, request: Request):
     require_auth(request)
+    rule = await get_schedule(rule_id)
     db = await get_db()
     await db.execute("DELETE FROM schedule_rules WHERE id = ?", (rule_id,))
     await db.commit()
-    await add_log(f"schedule {rule_id} deleted", "manual")
+    if rule:
+        await add_log(f"schedule {rule_id} deleted", "manual", target_id=rule["target_id"])
     return {"ok": True}
 
 
@@ -187,6 +212,20 @@ async def toggle_schedule(rule_id: int, request: Request):
     return {"ok": True}
 
 
+# --- LAN Scan ---
+
+@router.post("/scan")
+async def scan_lan(request: Request):
+    require_auth(request)
+    devices = await asyncio.to_thread(full_scan)
+    # Mark which are already targets
+    targets = await get_all_targets()
+    known_macs = {t["mac"].lower() for t in targets}
+    for dev in devices:
+        dev["is_target"] = dev["mac"].lower() in known_macs
+    return devices
+
+
 # --- Audit Log ---
 
 @router.get("/log")
@@ -194,7 +233,9 @@ async def get_log(request: Request):
     require_auth(request)
     db = await get_db()
     cursor = await db.execute(
-        "SELECT * FROM audit_log ORDER BY id DESC LIMIT 50"
+        "SELECT l.*, t.hostname, t.mac as target_mac FROM audit_log l "
+        "LEFT JOIN targets t ON l.target_id = t.id "
+        "ORDER BY l.id DESC LIMIT 50"
     )
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
