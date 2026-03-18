@@ -4,8 +4,10 @@ import subprocess
 import threading
 
 from scapy.all import (
-    Ether, ARP, IPv6, ICMPv6ND_RA, ICMPv6NDOptSrcLLAddr,
-    ICMPv6NDOptPrefixInfo, sendp, srp, sniff, conf,
+    Ether, ARP, IPv6,
+    ICMPv6ND_RA, ICMPv6ND_NA, ICMPv6NDOptSrcLLAddr, ICMPv6NDOptDstLLAddr,
+    ICMPv6NDOptPrefixInfo,
+    sendp, srp, sniff, conf, get_if_hwaddr,
 )
 
 from app.config import settings
@@ -21,10 +23,12 @@ class ArpBlocker:
         self.arp_interval: float = settings.arp_interval
         self.gateway_mac: str | None = None
         self.gateway_ll_addr: str | None = None  # gateway's IPv6 link-local
+        self.our_mac: str | None = None  # this host's MAC on the interface
         self.target_ip: str | None = None
+        self.target_ll_addr: str | None = None  # target's IPv6 link-local
         self._spoofing: bool = False
         self._spoof_thread: threading.Thread | None = None
-        self._ra_thread: threading.Thread | None = None
+        self._ndp_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
     def discover_gateway_mac(self) -> str:
@@ -154,23 +158,53 @@ class ArpBlocker:
             sendp(pkt, iface=self.interface, verbose=False)
             self._stop_event.wait(self.arp_interval)
 
-    def _ra_spoof_loop(self):
-        """Send fake Router Advertisements with lifetime=0 to kill target's IPv6 default route."""
-        if not self.gateway_ll_addr:
-            logger.warning("No gateway IPv6 link-local — IPv6 blocking inactive")
+    def _ndp_spoof_loop(self):
+        """Poison target's IPv6 neighbor cache: gateway's link-local -> our MAC."""
+        if not self.gateway_ll_addr or not self.target_ll_addr:
+            logger.warning("Missing IPv6 addresses — IPv6 NDP spoofing inactive")
             return
-        # Spoof RA from gateway's link-local with router_lifetime=0
+
+        # Fake Neighbor Advertisement: "gateway's link-local is at OUR MAC"
+        # Sent directly to target's link-local so only it is poisoned
+        # R=1 (router), S=1 (solicited), O=1 (override) to force cache update
+        na_pkt = (
+            Ether(dst=self.target_mac, src=self.our_mac)
+            / IPv6(src=self.gateway_ll_addr, dst=self.target_ll_addr)
+            / ICMPv6ND_NA(tgt=self.gateway_ll_addr, R=1, S=1, O=1)
+            / ICMPv6NDOptDstLLAddr(lladdr=self.our_mac)
+        )
+
+        # Also send spoofed RA with lifetime=0 to kill the default route
+        ra_pkt = (
+            Ether(dst=self.target_mac, src=self.our_mac)
+            / IPv6(src=self.gateway_ll_addr, dst=self.target_ll_addr)
+            / ICMPv6ND_RA(routerlifetime=0)
+            / ICMPv6NDOptSrcLLAddr(lladdr=self.our_mac)
+        )
+
+        logger.info(
+            "Starting NDP spoof loop (gateway_ll=%s -> our_mac=%s, target_ll=%s)",
+            self.gateway_ll_addr, self.our_mac, self.target_ll_addr,
+        )
+        while not self._stop_event.is_set():
+            sendp(na_pkt, iface=self.interface, verbose=False)
+            sendp(ra_pkt, iface=self.interface, verbose=False)
+            self._stop_event.wait(self.arp_interval)
+
+    def _send_corrective_ndp(self, count: int = 5):
+        """Restore correct gateway neighbor entry on the target."""
+        if not self.gateway_ll_addr or not self.target_ll_addr or not self.gateway_mac:
+            return
+        # Correct NA: gateway's link-local -> gateway's real MAC
         pkt = (
             Ether(dst=self.target_mac, src=self.gateway_mac)
-            / IPv6(src=self.gateway_ll_addr, dst="ff02::1")
-            / ICMPv6ND_RA(routerlifetime=0)
-            / ICMPv6NDOptSrcLLAddr(lladdr=self.gateway_mac)
+            / IPv6(src=self.gateway_ll_addr, dst=self.target_ll_addr)
+            / ICMPv6ND_NA(tgt=self.gateway_ll_addr, R=1, S=1, O=1)
+            / ICMPv6NDOptDstLLAddr(lladdr=self.gateway_mac)
         )
-        logger.info("Starting RA spoof loop (gateway_ll=%s)", self.gateway_ll_addr)
-        while not self._stop_event.is_set():
+        for _ in range(count):
             sendp(pkt, iface=self.interface, verbose=False)
-            # RAs less frequent than ARP — every 3 seconds is plenty
-            self._stop_event.wait(3.0)
+        logger.info("Sent %d corrective NDP packets", count)
 
     def _send_corrective_arp(self, count: int = 5):
         """Restore correct gateway ARP entry on the target."""
@@ -202,9 +236,9 @@ class ArpBlocker:
         self._stop_event.clear()
         self._spoof_thread = threading.Thread(target=self._spoof_loop, daemon=True)
         self._spoof_thread.start()
-        if self.gateway_ll_addr:
-            self._ra_thread = threading.Thread(target=self._ra_spoof_loop, daemon=True)
-            self._ra_thread.start()
+        if self.gateway_ll_addr and self.target_ll_addr:
+            self._ndp_thread = threading.Thread(target=self._ndp_spoof_loop, daemon=True)
+            self._ndp_thread.start()
         self._spoofing = True
         logger.info("Blocking ACTIVE (IPv4 + IPv6)")
 
@@ -217,12 +251,13 @@ class ArpBlocker:
         if self._spoof_thread:
             self._spoof_thread.join(timeout=5)
             self._spoof_thread = None
-        if self._ra_thread:
-            self._ra_thread.join(timeout=5)
-            self._ra_thread = None
+        if self._ndp_thread:
+            self._ndp_thread.join(timeout=5)
+            self._ndp_thread = None
         self._spoofing = False
         self._remove_iptables_rule()
         self._send_corrective_arp()
+        self._send_corrective_ndp()
         logger.info("Blocking INACTIVE (IPv4 + IPv6)")
 
     @property
@@ -233,4 +268,8 @@ class ArpBlocker:
         """Run discovery (call from startup, in a thread)."""
         self.gateway_mac = self.discover_gateway_mac()
         self.target_ip = self.discover_target_ip()
+        self.our_mac = get_if_hwaddr(self.interface)
+        logger.info("Our MAC: %s", self.our_mac)
         self.gateway_ll_addr = self.discover_gateway_ipv6_ll()
+        self.target_ll_addr = self._mac_to_ll(self.target_mac)
+        logger.info("Target IPv6 link-local (derived): %s", self.target_ll_addr)
