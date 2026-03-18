@@ -1,14 +1,22 @@
 // NetGuard — multi-target frontend
 
+// === API helper ===
+
 async function api(path, method = 'GET', body = null) {
     const opts = { method, headers: {} };
     if (body) {
         opts.headers['Content-Type'] = 'application/json';
         opts.body = JSON.stringify(body);
     }
-    const res = await fetch(path, opts);
-    if (res.status === 401) { window.location.href = '/'; return null; }
-    return res.json();
+    try {
+        const res = await fetch(path, opts);
+        if (res.status === 401) { window.location.href = '/'; return null; }
+        const data = await res.json();
+        if (!res.ok) return { _error: true, detail: data.detail || 'Server error' };
+        return data;
+    } catch (e) {
+        return { _error: true, detail: 'Network error' };
+    }
 }
 
 const DAY_LABELS = {
@@ -16,11 +24,18 @@ const DAY_LABELS = {
     mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun'
 };
 
+function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
 // === Targets ===
 
 async function refreshTargets() {
     const targets = await api('/api/targets');
-    if (!targets) return;
+    if (!targets || targets._error) return;
     const list = document.getElementById('targets-list');
 
     if (targets.length === 0) {
@@ -28,7 +43,7 @@ async function refreshTargets() {
         return;
     }
 
-    list.innerHTML = targets.map(t => renderTargetCard(t)).join('');
+    list.innerHTML = targets.map(renderTargetCard).join('');
 }
 
 function renderTargetCard(t) {
@@ -36,7 +51,7 @@ function renderTargetCard(t) {
     const statusClass = blocked ? 'blocked' : 'unblocked';
     const statusText = blocked ? 'BLOCKED' : 'UNBLOCKED';
     const displayName = t.hostname || 'Unknown Device';
-    const ip = t.target_ip || t.ip || '—';
+    const ip = t.target_ip || t.ip || '\u2014';
     const hasOverride = t.override !== 'none';
 
     let scheduleSummary = '';
@@ -52,7 +67,7 @@ function renderTargetCard(t) {
     }
 
     return `
-    <div class="card target-card">
+    <div class="card target-card" data-id="${t.id}">
         <div class="target-header">
             <div class="target-info">
                 <div class="target-name">${esc(displayName)}</div>
@@ -62,52 +77,57 @@ function renderTargetCard(t) {
                 <span class="dot"></span> ${statusText}
             </div>
         </div>
-
         ${hasOverride ? `<div class="override-badge">Override: ${t.override}</div>` : ''}
-
-        <div class="target-schedule" onclick="openScheduleModal(${t.id}, '${esc(displayName)}')">
+        <div class="target-schedule" data-action="schedule" data-name="${esc(displayName)}">
             ${scheduleSummary
-                ? `<span class="schedule-icon">&#128337;</span> ${esc(scheduleSummary)}`
-                : '<span class="schedule-icon">&#128337;</span> No schedule &mdash; tap to add'
+                ? `<span class="schedule-icon">\u{1F551}</span> ${esc(scheduleSummary)}`
+                : '<span class="schedule-icon">\u{1F551}</span> No schedule \u2014 tap to add'
             }
         </div>
-
         <div class="target-actions">
-            <button class="btn btn-danger btn-sm" onclick="targetAction(${t.id}, 'block')">BLOCK</button>
-            <button class="btn btn-success btn-sm" onclick="targetAction(${t.id}, 'unblock')">UNBLOCK</button>
-            ${hasOverride ? `<button class="btn btn-secondary btn-sm" onclick="targetAction(${t.id}, 'clear-override')">CLEAR</button>` : ''}
-            <button class="btn btn-delete btn-sm" onclick="deleteTarget(${t.id}, '${esc(displayName)}')">&times;</button>
+            <button class="btn btn-danger btn-sm" data-action="block">BLOCK</button>
+            <button class="btn btn-success btn-sm" data-action="unblock">UNBLOCK</button>
+            ${hasOverride ? '<button class="btn btn-secondary btn-sm" data-action="clear-override">CLEAR</button>' : ''}
+            <button class="btn btn-delete btn-sm" data-action="delete" data-name="${esc(displayName)}">\u00d7</button>
         </div>
     </div>`;
 }
 
-function esc(s) {
-    if (!s) return '';
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
+// Event delegation for target cards
+document.getElementById('targets-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const card = btn.closest('[data-id]');
+    if (!card) return;
+    const id = card.dataset.id;
+    const action = btn.dataset.action;
 
-async function targetAction(id, action) {
-    await api(`/api/targets/${id}/${action}`, 'POST');
+    if (action === 'schedule') {
+        openScheduleModal(id, btn.dataset.name);
+        return;
+    }
+    if (action === 'delete') {
+        const name = btn.dataset.name || 'this target';
+        if (!confirm(`Remove "${name}"? This will unblock it and delete all its schedules.`)) return;
+        await api(`/api/targets/${id}`, 'DELETE');
+    } else {
+        btn.disabled = true;
+        btn.textContent = '...';
+        await api(`/api/targets/${id}/${action}`, 'POST');
+    }
     await refreshTargets();
     await refreshLog();
-}
-
-async function deleteTarget(id, name) {
-    if (!confirm(`Remove target "${name}"? This will unblock it and delete all its schedules.`)) return;
-    await api(`/api/targets/${id}`, 'DELETE');
-    await refreshTargets();
-    await refreshLog();
-}
+});
 
 // === Schedule Modal ===
 
 let _scheduleTargetId = null;
 
-async function openScheduleModal(targetId, name) {
+function openScheduleModal(targetId, name) {
     _scheduleTargetId = targetId;
     document.getElementById('schedule-modal-title').textContent = `Schedule: ${name}`;
     document.getElementById('schedule-modal').hidden = false;
-    await refreshScheduleModal();
+    refreshScheduleModal();
 }
 
 function closeScheduleModal() {
@@ -118,7 +138,7 @@ function closeScheduleModal() {
 async function refreshScheduleModal() {
     if (!_scheduleTargetId) return;
     const rules = await api(`/api/targets/${_scheduleTargetId}/schedules`);
-    if (!rules) return;
+    if (!rules || rules._error) return;
     const list = document.getElementById('schedule-rules-list');
 
     if (rules.length === 0) {
@@ -132,24 +152,26 @@ async function refreshScheduleModal() {
                 ${DAY_LABELS[r.day_of_week] || r.day_of_week} ${r.start_time}\u2013${r.end_time}
             </span>
             <div class="rule-actions">
-                <button class="btn btn-sm btn-secondary" onclick="toggleRule(${r.id})">${r.enabled ? '\u2611' : '\u2610'}</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteRule(${r.id})">\u2715</button>
+                <button class="btn btn-sm btn-secondary" data-rule-action="toggle" data-rule-id="${r.id}">${r.enabled ? '\u2611' : '\u2610'}</button>
+                <button class="btn btn-sm btn-danger" data-rule-action="delete" data-rule-id="${r.id}">\u2715</button>
             </div>
         </div>
     `).join('');
 }
 
-async function toggleRule(ruleId) {
-    await api(`/api/schedules/${ruleId}/toggle`, 'PATCH');
+// Event delegation for schedule rules
+document.getElementById('schedule-rules-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-rule-action]');
+    if (!btn) return;
+    const ruleId = btn.dataset.ruleId;
+    if (btn.dataset.ruleAction === 'toggle') {
+        await api(`/api/schedules/${ruleId}/toggle`, 'PATCH');
+    } else if (btn.dataset.ruleAction === 'delete') {
+        await api(`/api/schedules/${ruleId}`, 'DELETE');
+    }
     await refreshScheduleModal();
     await refreshTargets();
-}
-
-async function deleteRule(ruleId) {
-    await api(`/api/schedules/${ruleId}`, 'DELETE');
-    await refreshScheduleModal();
-    await refreshTargets();
-}
+});
 
 document.getElementById('schedule-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -169,56 +191,95 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
 
 // === LAN Scan Modal ===
 
+let _scanResults = [];
+
 async function openScanModal() {
     document.getElementById('scan-modal').hidden = false;
-    document.getElementById('scan-results').innerHTML = '<p class="dim">Scanning network...</p>';
+    document.getElementById('scan-results').innerHTML = '<p class="dim">Scanning network... this may take a moment.</p>';
     const devices = await api('/api/scan', 'POST');
-    if (!devices) return;
-
-    if (devices.length === 0) {
-        document.getElementById('scan-results').innerHTML = '<p class="dim">No devices found.</p>';
+    if (!devices || devices._error) {
+        document.getElementById('scan-results').innerHTML = '<p class="dim">Scan failed. Try again.</p>';
         return;
     }
+    _scanResults = devices;
+    renderScanResults();
+}
 
-    document.getElementById('scan-results').innerHTML = devices.map(d => `
+function renderScanResults() {
+    const el = document.getElementById('scan-results');
+    if (_scanResults.length === 0) {
+        el.innerHTML = '<p class="dim">No devices found.</p>';
+        return;
+    }
+    el.innerHTML = _scanResults.map((d, i) => `
         <div class="scan-device ${d.is_target ? 'already-added' : ''}">
             <div class="scan-device-info">
-                <div class="scan-device-name">${esc(d.hostname) || '<em>Unknown</em>'}</div>
+                <div class="scan-device-name">${d.hostname ? esc(d.hostname) : '<em>Unknown</em>'}</div>
                 <div class="scan-device-details">${esc(d.ip)} &middot; ${esc(d.mac)}</div>
             </div>
             ${d.is_target
                 ? '<span class="dim">Added</span>'
-                : `<button class="btn btn-primary btn-sm" onclick="addFromScan('${esc(d.mac)}', '${esc(d.ip)}', '${esc(d.hostname || '')}')">Add</button>`
+                : `<button class="btn btn-primary btn-sm" data-scan-idx="${i}">Add</button>`
             }
         </div>
     `).join('');
 }
 
+// Event delegation for scan results
+document.getElementById('scan-results').addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-scan-idx]');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.scanIdx);
+    const d = _scanResults[idx];
+    if (!d) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+    const result = await api('/api/targets', 'POST', {
+        mac: d.mac,
+        ip: d.ip || null,
+        hostname: d.hostname || null,
+    });
+    if (result && !result._error && result.ok) {
+        d.is_target = true;
+        renderScanResults();
+        await refreshTargets();
+        await refreshLog();
+    } else {
+        btn.textContent = result?.error || 'Failed';
+        btn.disabled = true;
+    }
+});
+
 function closeScanModal() {
     document.getElementById('scan-modal').hidden = true;
-}
-
-async function addFromScan(mac, ip, hostname) {
-    await api('/api/targets', 'POST', { mac, ip: ip || null, hostname: hostname || null });
-    closeScanModal();
-    await refreshTargets();
-    await refreshLog();
 }
 
 // === Manual Add ===
 
 document.getElementById('add-target-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const mac = document.getElementById('add-mac').value.trim();
-    const hostname = document.getElementById('add-hostname').value.trim() || null;
+    const macInput = document.getElementById('add-mac');
+    const hostInput = document.getElementById('add-hostname');
+    const mac = macInput.value.trim();
+    const hostname = hostInput.value.trim() || null;
+    if (!mac) return;
+
+    const btn = e.target.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+
     const result = await api('/api/targets', 'POST', { mac, hostname });
-    if (result && result.ok) {
-        document.getElementById('add-mac').value = '';
-        document.getElementById('add-hostname').value = '';
+    btn.disabled = false;
+    btn.textContent = 'Add';
+
+    if (result && !result._error && result.ok) {
+        macInput.value = '';
+        hostInput.value = '';
         await refreshTargets();
         await refreshLog();
-    } else if (result) {
-        alert(result.error || 'Failed to add target');
+    } else {
+        alert(result?.error || result?.detail || 'Failed to add target');
     }
 });
 
@@ -226,7 +287,7 @@ document.getElementById('add-target-form').addEventListener('submit', async (e) 
 
 async function refreshLog() {
     const logs = await api('/api/log');
-    if (!logs) return;
+    if (!logs || logs._error) return;
     const list = document.getElementById('log-list');
 
     if (logs.length === 0) {
@@ -239,7 +300,7 @@ async function refreshLog() {
         const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const who = l.hostname || l.target_mac || '';
         const label = who ? ` [${who}]` : '';
-        return `<div class="log-item"><span class="log-time">${time}</span>${label} — ${l.action} (${l.source})</div>`;
+        return `<div class="log-item"><span class="log-time">${time}</span>${label} \u2014 ${l.action} (${l.source})</div>`;
     }).join('');
 }
 

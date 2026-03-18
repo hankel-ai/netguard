@@ -77,10 +77,13 @@ async def add_target(body: AddTargetRequest, request: Request):
     existing = await get_target_by_mac(body.mac)
     if existing:
         return {"ok": False, "error": "Target with this MAC already exists"}
-    target_id = await db_add_target(body.mac, body.ip, body.hostname)
-    await asyncio.to_thread(_manager.add_target, target_id, body.mac)
-    await add_log(f"target added: {body.mac}", "manual", target_id=target_id)
-    return {"ok": True, "id": target_id}
+    try:
+        target_id = await db_add_target(body.mac, body.ip, body.hostname)
+        await asyncio.to_thread(_manager.add_target, target_id, body.mac)
+        await add_log(f"target added: {body.mac}", "manual", target_id=target_id)
+        return {"ok": True, "id": target_id}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @router.delete("/targets/{target_id}")

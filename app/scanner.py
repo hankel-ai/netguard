@@ -1,8 +1,9 @@
 import logging
 import socket
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from scapy.all import Ether, ARP, srp, conf
+from scapy.all import Ether, ARP, srp, conf, get_if_hwaddr
 
 from app.config import settings
 
@@ -19,10 +20,17 @@ def scan_network() -> list[dict]:
         timeout=5,
         iface=settings.interface,
     )
+    # Filter out gateway and ourselves
+    our_mac = get_if_hwaddr(settings.interface).lower()
+    gateway_ip = settings.gateway_ip
     devices = []
     for sent, recv in ans:
-        devices.append({"mac": recv.hwsrc.lower(), "ip": recv.psrc})
-    logger.info("Found %d devices", len(devices))
+        mac = recv.hwsrc.lower()
+        ip = recv.psrc
+        if mac == our_mac or ip == gateway_ip:
+            continue
+        devices.append({"mac": mac, "ip": ip})
+    logger.info("Found %d devices (excluding gateway and self)", len(devices))
     return devices
 
 
@@ -40,7 +48,7 @@ def resolve_hostname(ip: str) -> str | None:
     try:
         result = subprocess.run(
             ["nmblookup", "-A", ip],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=3,
         )
         if result.returncode == 0:
             for line in result.stdout.splitlines():
@@ -56,8 +64,19 @@ def resolve_hostname(ip: str) -> str | None:
 
 
 def full_scan() -> list[dict]:
-    """Scan network and resolve hostnames. Returns [{mac, ip, hostname}]."""
+    """Scan network and resolve hostnames in parallel."""
     devices = scan_network()
-    for dev in devices:
-        dev["hostname"] = resolve_hostname(dev["ip"])
+
+    # Resolve hostnames concurrently (max 20 threads, 3s timeout each)
+    with ThreadPoolExecutor(max_workers=20) as pool:
+        futures = {pool.submit(resolve_hostname, d["ip"]): d for d in devices}
+        for future in as_completed(futures):
+            dev = futures[future]
+            try:
+                dev["hostname"] = future.result()
+            except Exception:
+                dev["hostname"] = None
+
+    # Sort: devices with hostnames first, then by IP
+    devices.sort(key=lambda d: (d["hostname"] is None, d["ip"]))
     return devices
