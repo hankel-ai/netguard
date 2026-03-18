@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+  netguard:
+    build: .
+    container_name: netguard
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    env_file: .env
+    volumes:
+      - netguard-data:/data
+volumes:
+  netguard-data:

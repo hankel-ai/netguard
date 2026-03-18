@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetGuard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>NetGuard</h1>
+
+        <section class="status-section">
+            <div id="status-indicator" class="status-indicator unblocked">
+                <span class="dot"></span>
+                <span id="status-text">LOADING...</span>
+            </div>
+            <div id="override-badge" class="override-badge" hidden>Manual override active</div>
+            <div class="controls">
+                <button id="btn-block" class="btn btn-danger" onclick="doAction('block')">BLOCK</button>
+                <button id="btn-unblock" class="btn btn-success" onclick="doAction('unblock')">UNBLOCK</button>
+            </div>
+            <button id="btn-clear" class="btn btn-secondary" hidden onclick="doAction('clear-override')">Clear Override</button>
+            <div class="target-info">
+                <span id="target-info"></span>
+            </div>
+        </section>
+
+        <section class="schedule-section">
+            <h2>Schedule</h2>
+            <div id="schedule-list"></div>
+            <form id="add-rule-form" class="add-rule-form">
+                <select id="rule-day">
+                    <option value="weekday">Weekdays</option>
+                    <option value="weekend">Weekend</option>
+                    <option value="mon">Monday</option>
+                    <option value="tue">Tuesday</option>
+                    <option value="wed">Wednesday</option>
+                    <option value="thu">Thursday</option>
+                    <option value="fri">Friday</option>
+                    <option value="sat">Saturday</option>
+                    <option value="sun">Sunday</option>
+                </select>
+                <input type="time" id="rule-start" required>
+                <span>to</span>
+                <input type="time" id="rule-end" required>
+                <button type="submit" class="btn btn-primary">+ Add</button>
+            </form>
+        </section>
+
+        <section class="log-section">
+            <h2>Recent Activity</h2>
+            <div id="log-list"></div>
+        </section>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
