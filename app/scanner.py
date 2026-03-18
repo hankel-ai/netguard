@@ -34,6 +34,19 @@ def scan_network() -> list[dict]:
     return devices
 
 
+def resolve_mac(ip: str) -> str | None:
+    """Send targeted ARP request to resolve MAC for a single IP."""
+    conf.verb = 0
+    ans, _ = srp(
+        Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ip),
+        timeout=3,
+        iface=settings.interface,
+    )
+    if ans:
+        return ans[0][1].hwsrc.lower()
+    return None
+
+
 def resolve_hostname(ip: str) -> str | None:
     """Try to resolve hostname via reverse DNS, then NetBIOS."""
     # Reverse DNS

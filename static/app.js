@@ -343,23 +343,20 @@ document.getElementById('scan-list').addEventListener('click', async (e) => {
 
 document.getElementById('add-target-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const macInput = document.getElementById('add-mac');
-    const hostInput = document.getElementById('add-hostname');
-    const mac = macInput.value.trim();
-    const hostname = hostInput.value.trim() || null;
-    if (!mac) return;
+    const ipInput = document.getElementById('add-ip');
+    const ip = ipInput.value.trim();
+    if (!ip) return;
 
     const btn = e.target.querySelector('button[type="submit"]');
     btn.disabled = true;
-    btn.textContent = 'Adding...';
+    btn.textContent = 'Resolving...';
 
-    const result = await api('/api/targets', 'POST', { mac, hostname });
+    const result = await api('/api/targets', 'POST', { ip });
     btn.disabled = false;
     btn.textContent = 'Add';
 
     if (result && !result._error && result.ok) {
-        macInput.value = '';
-        hostInput.value = '';
+        ipInput.value = '';
         await refreshTargets();
         await refreshLog();
     } else {

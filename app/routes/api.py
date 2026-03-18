@@ -10,7 +10,7 @@ from app.database import (
     get_schedules_for_target, get_schedule, add_log, get_db,
 )
 from app.scheduler import evaluate_schedule_for_target
-from app.scanner import full_scan
+from app.scanner import full_scan, resolve_mac, resolve_hostname
 
 router = APIRouter(prefix="/api")
 
@@ -29,9 +29,9 @@ class LoginRequest(BaseModel):
 
 
 class AddTargetRequest(BaseModel):
-    mac: str
+    ip: str
+    mac: str | None = None
     hostname: str | None = None
-    ip: str | None = None
 
 
 class ScheduleCreate(BaseModel):
@@ -74,13 +74,23 @@ async def list_targets(request: Request):
 @router.post("/targets")
 async def add_target(body: AddTargetRequest, request: Request):
     require_auth(request)
-    existing = await get_target_by_mac(body.mac)
+    mac = body.mac
+    hostname = body.hostname
+    # If no MAC provided, resolve it from the IP via ARP
+    if not mac:
+        mac = await asyncio.to_thread(resolve_mac, body.ip)
+        if not mac:
+            return {"ok": False, "error": f"Could not resolve MAC for {body.ip} — is the device online?"}
+    # If no hostname provided, try to resolve it
+    if not hostname:
+        hostname = await asyncio.to_thread(resolve_hostname, body.ip)
+    existing = await get_target_by_mac(mac)
     if existing:
         return {"ok": False, "error": "Target with this MAC already exists"}
     try:
-        target_id = await db_add_target(body.mac, body.ip, body.hostname)
-        await asyncio.to_thread(_manager.add_target, target_id, body.mac)
-        await add_log(f"target added: {body.mac}", "manual", target_id=target_id)
+        target_id = await db_add_target(mac, body.ip, hostname)
+        await asyncio.to_thread(_manager.add_target, target_id, mac)
+        await add_log(f"target added: {mac}", "manual", target_id=target_id)
         return {"ok": True, "id": target_id}
     except Exception as e:
         return {"ok": False, "error": str(e)}
