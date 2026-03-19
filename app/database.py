@@ -155,7 +155,10 @@ async def upsert_lan_device(mac: str, ip: str | None, hostname: str | None):
     db = await get_db()
     await db.execute(
         "INSERT INTO lan_devices (mac, ip, hostname, last_seen) VALUES (?, ?, ?, datetime('now')) "
-        "ON CONFLICT(mac) DO UPDATE SET ip=excluded.ip, hostname=excluded.hostname, last_seen=datetime('now')",
+        "ON CONFLICT(mac) DO UPDATE SET "
+        "ip = COALESCE(excluded.ip, lan_devices.ip), "
+        "hostname = COALESCE(excluded.hostname, lan_devices.hostname), "
+        "last_seen = datetime('now')",
         (mac.lower(), ip, hostname),
     )
     await db.commit()

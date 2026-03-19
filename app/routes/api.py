@@ -270,15 +270,16 @@ async def list_lan_devices(request: Request):
 async def scan_lan(request: Request):
     require_auth(request)
     devices = await asyncio.to_thread(full_scan)
-    # Cache results in DB
+    # Upsert found devices into cache (preserves existing hostnames if new scan can't resolve)
     for dev in devices:
         await upsert_lan_device(dev["mac"], dev["ip"], dev.get("hostname"))
-    # Mark which are already targets
+    # Return ALL cached devices, not just current scan results
+    all_devices = await get_all_lan_devices()
     targets = await get_all_targets()
     known_macs = {t["mac"].lower() for t in targets}
-    for dev in devices:
+    for dev in all_devices:
         dev["is_target"] = dev["mac"].lower() in known_macs
-    return devices
+    return all_devices
 
 
 # --- Audit Log ---
