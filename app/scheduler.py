@@ -88,9 +88,9 @@ def init_scheduler(manager):
     global _scheduler, _manager
     _manager = manager
     _scheduler = AsyncIOScheduler()
-    _scheduler.add_job(tick, "interval", seconds=60, id="schedule_tick")
+    _scheduler.add_job(tick, "interval", seconds=15, id="schedule_tick")
     _scheduler.start()
-    logger.info("Scheduler started (60s interval)")
+    logger.info("Scheduler started (15s interval)")
 
 
 def stop_scheduler():
