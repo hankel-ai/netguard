@@ -227,7 +227,7 @@ async function refreshScheduleModal() {
     const list = document.getElementById('schedule-rules-list');
 
     if (rules.length === 0) {
-        list.innerHTML = '<p class="dim">No rules yet. Add one below.</p>';
+        list.innerHTML = '<p class="dim">No schedules yet. Add one below.</p>';
         return;
     }
 
