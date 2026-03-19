@@ -151,7 +151,7 @@ function renderTargetCard(t) {
             <button class="btn btn-danger btn-sm${blockPressed ? ' btn-pressed' : ''}" data-action="block"${blockPressed ? ' disabled' : ''}>BLOCK</button>
             <button class="btn btn-success btn-sm${unblockPressed ? ' btn-pressed' : ''}" data-action="unblock"${unblockPressed ? ' disabled' : ''}>UNBLOCK</button>
             ${hasOverride ? '<button class="btn btn-secondary btn-sm" data-action="clear-override">CLEAR</button>' : ''}
-            <button class="btn btn-delete btn-sm" data-action="delete" data-name="${esc(displayName)}">\u00d7</button>
+            <button class="btn btn-sm btn-danger" data-action="delete" data-name="${esc(displayName)}">\u2715</button>
         </div>
     </div>`;
 }
