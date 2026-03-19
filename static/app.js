@@ -166,12 +166,23 @@ document.getElementById('targets-list').addEventListener('click', async (e) => {
     const action = btn.dataset.action;
 
     if (action === 'edit-desc') {
+        const input = btn.querySelector('.desc-input');
+        if (input) { input.focus(); return; }
         const target = _targets.find(t => String(t.id) === id);
         const current = target?.description || '';
-        const desc = prompt('Description:', current);
-        if (desc === null) return;
-        await api(`/api/targets/${id}/description`, 'PATCH', { description: desc });
-        await refreshTargets();
+        btn.innerHTML = `<input class="desc-input" type="text" value="${esc(current)}" placeholder="Add description...">`;
+        const newInput = btn.querySelector('.desc-input');
+        newInput.focus();
+        const save = async () => {
+            const val = newInput.value.trim();
+            await api(`/api/targets/${id}/description`, 'PATCH', { description: val });
+            await refreshTargets();
+        };
+        newInput.addEventListener('blur', save);
+        newInput.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') newInput.blur();
+            if (ev.key === 'Escape') { refreshTargets(); }
+        });
         return;
     }
     if (action === 'schedule') {

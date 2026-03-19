@@ -149,6 +149,17 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 
 .target-desc:hover { color: var(--text); }
 
+.desc-input {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--blue);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.8rem;
+    outline: none;
+}
+
 .status-badge {
     display: inline-flex;
     align-items: center;
