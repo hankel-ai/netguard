@@ -31,6 +31,19 @@ function esc(s) {
     return d.innerHTML;
 }
 
+function fmtBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+    if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
+    return (b / 1073741824).toFixed(2) + ' GB';
+}
+
+function fmtRate(bps) {
+    if (bps < 1024) return bps + ' B/s';
+    if (bps < 1048576) return (bps / 1024).toFixed(1) + ' KB/s';
+    return (bps / 1048576).toFixed(1) + ' MB/s';
+}
+
 function fmt12(time24) {
     if (!time24) return '';
     const [h, m] = time24.split(':').map(Number);
@@ -95,6 +108,7 @@ function renderTargets() {
 
 function renderTargetCard(t) {
     const blocked = t.is_blocking;
+    const monitoring = t.is_monitoring;
     const statusClass = blocked ? 'blocked' : 'unblocked';
     const statusText = blocked ? 'BLOCKED' : 'UNBLOCKED';
     const displayName = t.hostname || t.device_type || t.vendor || 'Unknown Device';
@@ -127,6 +141,20 @@ function renderTargetCard(t) {
 
     const desc = t.description || '';
 
+    let trafficHtml = '';
+    if (monitoring && t.traffic) {
+        const s = t.traffic;
+        const active = (s.tx_rate > 0 || s.rx_rate > 0);
+        trafficHtml = `
+        <div class="traffic-stats${active ? ' traffic-active' : ''}">
+            <span class="traffic-rate">&uarr; ${fmtRate(s.tx_rate)}</span>
+            <span class="traffic-rate">&darr; ${fmtRate(s.rx_rate)}</span>
+            <span class="traffic-total dim">${fmtBytes(s.tx_bytes)} up / ${fmtBytes(s.rx_bytes)} down</span>
+        </div>`;
+    } else if (monitoring) {
+        trafficHtml = '<div class="traffic-stats dim">Monitoring... waiting for data</div>';
+    }
+
     return `
     <div class="card target-card" data-id="${t.id}">
         <div class="target-header">
@@ -140,7 +168,7 @@ function renderTargetCard(t) {
             <div class="status-badge ${statusClass}">
                 <span class="dot"></span> ${statusText}
             </div>
-        </div>
+        </div>${trafficHtml}
         <div class="${scheduleClass}" data-action="schedule" data-name="${esc(displayName)}">
             ${scheduleSummary
                 ? `<span class="schedule-icon">\u{1F551}</span> ${esc(scheduleSummary)}`
@@ -151,6 +179,7 @@ function renderTargetCard(t) {
             <button class="btn btn-danger btn-sm${blockPressed ? ' btn-pressed' : ''}" data-action="block"${blockPressed ? ' disabled' : ''}>BLOCK</button>
             <button class="btn btn-success btn-sm${unblockPressed ? ' btn-pressed' : ''}" data-action="unblock"${unblockPressed ? ' disabled' : ''}>UNBLOCK</button>
             ${hasOverride ? '<button class="btn btn-secondary btn-sm" data-action="clear-override">CLEAR</button>' : ''}
+            <button class="btn btn-sm${monitoring ? ' btn-monitor-active' : ' btn-secondary'}" data-action="${monitoring ? 'unmonitor' : 'monitor'}">${monitoring ? 'MONITORING' : 'MONITOR'}</button>
             <button class="btn btn-sm btn-danger" data-action="delete" data-name="${esc(displayName)}">\u2715</button>
         </div>
     </div>`;

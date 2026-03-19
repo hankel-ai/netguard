@@ -30,6 +30,8 @@ class TargetBlocker:
         self.gateway_ll_addr = gateway_ll_addr
         self.target_ip: str | None = None
         self._spoofing = False
+        self._is_blocking = False
+        self._is_monitoring = False
         self._spoof_thread: threading.Thread | None = None
         self._ndp_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -149,12 +151,11 @@ class TargetBlocker:
         for _ in range(count):
             sendp(pkt, iface=self.interface, verbose=False)
 
-    # --- Public API ---
+    # --- Spoof lifecycle (shared by block + monitor) ---
 
-    async def block(self):
+    def _start_spoof(self):
         if self._spoofing:
             return
-        self._add_all_rules()
         self._stop_event.clear()
         self._spoof_thread = threading.Thread(target=self._spoof_loop, daemon=True)
         self._spoof_thread.start()
@@ -162,11 +163,11 @@ class TargetBlocker:
             self._ndp_thread = threading.Thread(target=self._ndp_spoof_loop, daemon=True)
             self._ndp_thread.start()
         self._spoofing = True
-        logger.info("[%s] Blocking ACTIVE", self.target_mac)
 
-    async def unblock(self):
+    def _stop_spoof_if_idle(self):
         if not self._spoofing:
-            self._remove_all_rules()
+            return
+        if self._is_blocking or self._is_monitoring:
             return
         self._stop_event.set()
         if self._spoof_thread:
@@ -176,14 +177,49 @@ class TargetBlocker:
             self._ndp_thread.join(timeout=5)
             self._ndp_thread = None
         self._spoofing = False
-        self._remove_all_rules()
         self._send_corrective_arp()
         self._send_corrective_ndp()
+
+    # --- Public API ---
+
+    async def block(self):
+        if self._is_blocking:
+            return
+        self._is_blocking = True
+        self._add_all_rules()
+        self._start_spoof()
+        logger.info("[%s] Blocking ACTIVE", self.target_mac)
+
+    async def unblock(self):
+        if not self._is_blocking:
+            self._remove_all_rules()
+            return
+        self._is_blocking = False
+        self._remove_all_rules()
+        self._stop_spoof_if_idle()
         logger.info("[%s] Blocking INACTIVE", self.target_mac)
+
+    async def start_monitor(self):
+        if self._is_monitoring:
+            return
+        self._is_monitoring = True
+        self._start_spoof()
+        logger.info("[%s] Monitoring ACTIVE", self.target_mac)
+
+    async def stop_monitor(self):
+        if not self._is_monitoring:
+            return
+        self._is_monitoring = False
+        self._stop_spoof_if_idle()
+        logger.info("[%s] Monitoring INACTIVE", self.target_mac)
 
     @property
     def is_blocking(self) -> bool:
-        return self._spoofing
+        return self._is_blocking
+
+    @property
+    def is_monitoring(self) -> bool:
+        return self._is_monitoring
 
 
 class BlockerManager:
@@ -265,5 +301,6 @@ class BlockerManager:
         with self._lock:
             blockers = list(self._blockers.values())
         for b in blockers:
+            await b.stop_monitor()
             await b.unblock()
         logger.info("All targets unblocked")

@@ -222,6 +222,42 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
     color: var(--red);
 }
 
+/* Traffic stats */
+.traffic-stats {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    background: rgba(30, 136, 229, 0.08);
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+}
+
+.traffic-stats.traffic-active {
+    background: rgba(30, 136, 229, 0.15);
+    border-left: 3px solid var(--blue);
+}
+
+.traffic-rate {
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.traffic-total {
+    font-size: 0.75rem;
+    margin-left: auto;
+}
+
+/* Monitor button */
+.btn-monitor-active {
+    background: var(--blue);
+    color: #fff;
+}
+
 /* Pressed override button */
 .btn-pressed {
     opacity: 0.4;

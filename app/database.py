@@ -47,6 +47,7 @@ MIGRATIONS = [
     "ALTER TABLE targets ADD COLUMN description TEXT",
     "ALTER TABLE lan_devices ADD COLUMN vendor TEXT",
     "ALTER TABLE lan_devices ADD COLUMN device_type TEXT",
+    "ALTER TABLE targets ADD COLUMN is_monitoring INTEGER NOT NULL DEFAULT 0",
 ]
 
 

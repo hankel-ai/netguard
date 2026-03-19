@@ -17,11 +17,17 @@ from app.oui import lookup_vendor
 router = APIRouter(prefix="/api")
 
 _manager = None  # BlockerManager
+_traffic = None   # TrafficMonitor
 
 
 def set_manager(manager):
     global _manager
     _manager = manager
+
+
+def set_traffic_monitor(monitor):
+    global _traffic
+    _traffic = monitor
 
 
 # --- Models ---
@@ -70,11 +76,14 @@ async def login(body: LoginRequest, response: Response):
 async def list_targets(request: Request):
     require_auth(request)
     targets = await get_all_targets()
+    all_stats = _traffic.get_all_stats() if _traffic else {}
     for t in targets:
         blocker = _manager.get_blocker(t["id"])
         t["is_blocking"] = blocker.is_blocking if blocker else False
+        t["is_monitoring"] = blocker.is_monitoring if blocker else False
         t["target_ip"] = blocker.target_ip if blocker else t.get("ip")
         t["schedules"] = await get_schedules_for_target(t["id"])
+        t["traffic"] = all_stats.get(t["id"])
         # Add vendor info from OUI lookup
         vendor, device_type = lookup_vendor(t["mac"])
         t["vendor"] = vendor
@@ -125,6 +134,7 @@ async def delete_target(target_id: int, request: Request):
     target = await get_target(target_id)
     if not target:
         return {"ok": False, "error": "Not found"}
+    await asyncio.to_thread(_traffic.remove_target, target_id)
     await _manager.remove_target(target_id)
     await db_remove_target(target_id)
     await add_log(f"target removed: {target['mac']}", "manual", target_id=target_id)
@@ -176,6 +186,34 @@ async def clear_override(target_id: int, request: Request):
         await update_target(target_id, is_blocking=0)
         await add_log("unblocked", "schedule", target_id=target_id)
     return {"ok": True, "is_blocking": blocker.is_blocking}
+
+
+@router.post("/targets/{target_id}/monitor")
+async def start_monitor(target_id: int, request: Request):
+    require_auth(request)
+    blocker = _manager.get_blocker(target_id)
+    if not blocker:
+        return {"ok": False, "error": "Target not found"}
+    await blocker.start_monitor()
+    await asyncio.to_thread(
+        _traffic.add_target, target_id, blocker.target_mac, blocker.target_ip
+    )
+    await update_target(target_id, is_monitoring=1)
+    await add_log("monitoring started", "manual", target_id=target_id)
+    return {"ok": True}
+
+
+@router.post("/targets/{target_id}/unmonitor")
+async def stop_monitor(target_id: int, request: Request):
+    require_auth(request)
+    blocker = _manager.get_blocker(target_id)
+    if not blocker:
+        return {"ok": False, "error": "Target not found"}
+    await blocker.stop_monitor()
+    await asyncio.to_thread(_traffic.remove_target, target_id)
+    await update_target(target_id, is_monitoring=0)
+    await add_log("monitoring stopped", "manual", target_id=target_id)
+    return {"ok": True}
 
 
 @router.patch("/targets/{target_id}/description")

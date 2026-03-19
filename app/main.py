@@ -7,9 +7,10 @@ from fastapi.staticfiles import StaticFiles
 
 from app.arp import BlockerManager
 from app.database import get_all_targets, update_target, close_db, add_log
-from app.routes.api import router as api_router, set_manager
+from app.routes.api import router as api_router, set_manager, set_traffic_monitor
 from app.routes.pages import router as pages_router
 from app.scheduler import init_scheduler, stop_scheduler
+from app.traffic import TrafficMonitor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,6 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger("netguard")
 
 manager = BlockerManager()
+traffic_monitor = TrafficMonitor()
 
 
 @asynccontextmanager
@@ -25,7 +27,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("NetGuard starting up...")
     await asyncio.to_thread(manager.init)
+    await asyncio.to_thread(traffic_monitor.init)
     set_manager(manager)
+    set_traffic_monitor(traffic_monitor)
 
     # Restore all targets from DB
     targets = await get_all_targets()
@@ -36,7 +40,14 @@ async def lifespan(app: FastAPI):
             await blocker.block()
             await update_target(t["id"], is_blocking=1)
             await add_log("block restored on startup", "system", target_id=t["id"])
+        if t.get("is_monitoring"):
+            logger.info("Restoring MONITOR for target %d (%s)", t["id"], t["mac"])
+            await blocker.start_monitor()
+            await asyncio.to_thread(
+                traffic_monitor.add_target, t["id"], t["mac"], blocker.target_ip
+            )
 
+    traffic_monitor.start()
     init_scheduler(manager)
     logger.info("NetGuard ready (%d targets loaded)", len(targets))
 
@@ -45,6 +56,7 @@ async def lifespan(app: FastAPI):
     # Shutdown: always unblock all
     logger.info("NetGuard shutting down — unblocking all...")
     stop_scheduler()
+    await asyncio.to_thread(traffic_monitor.cleanup)
     await manager.shutdown()
     for t in await get_all_targets():
         await update_target(t["id"], is_blocking=0, override="none")
