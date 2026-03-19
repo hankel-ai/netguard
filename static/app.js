@@ -205,20 +205,81 @@ document.getElementById('targets-list').addEventListener('click', async (e) => {
 // === Schedule Modal ===
 
 let _scheduleTargetId = null;
+let _editingRuleId = null;
+
+// Time picker helpers
+function to12(time24) {
+    const [h, m] = time24.split(':').map(Number);
+    return { h: h % 12 || 12, m, p: h >= 12 ? 'PM' : 'AM' };
+}
+
+function to24(h, m, p) {
+    let h24 = h % 12;
+    if (p === 'PM') h24 += 12;
+    return `${String(h24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function initTimePickers() {
+    ['rule-start-h', 'rule-end-h'].forEach(id => {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '';
+        for (let h = 1; h <= 12; h++) sel.add(new Option(h, h));
+    });
+    ['rule-start-m', 'rule-end-m'].forEach(id => {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '';
+        for (let m = 0; m < 60; m += 5) sel.add(new Option(String(m).padStart(2, '0'), m));
+    });
+    ['rule-start-p', 'rule-end-p'].forEach(id => {
+        const sel = document.getElementById(id);
+        sel.innerHTML = '';
+        sel.add(new Option('AM', 'AM'));
+        sel.add(new Option('PM', 'PM'));
+    });
+}
+
+function setTimePicker(prefix, time24) {
+    const t = to12(time24);
+    document.getElementById(prefix + '-h').value = t.h;
+    // Snap to nearest 5-min
+    const snapped = Math.round(t.m / 5) * 5;
+    document.getElementById(prefix + '-m').value = snapped >= 60 ? 55 : snapped;
+    document.getElementById(prefix + '-p').value = t.p;
+}
+
+function getTimePicker(prefix) {
+    const h = parseInt(document.getElementById(prefix + '-h').value);
+    const m = parseInt(document.getElementById(prefix + '-m').value);
+    const p = document.getElementById(prefix + '-p').value;
+    return to24(h, m, p);
+}
+
+function resetScheduleForm() {
+    _editingRuleId = null;
+    document.getElementById('rule-day').value = 'weekday';
+    setTimePicker('rule-start', '22:00');
+    setTimePicker('rule-end', '07:00');
+    document.getElementById('schedule-submit-btn').textContent = '+ Add';
+    document.getElementById('schedule-cancel-btn').hidden = true;
+}
 
 function openScheduleModal(targetId, name) {
     _scheduleTargetId = targetId;
     document.getElementById('schedule-modal-title').textContent = `Schedule: ${name}`;
     document.getElementById('schedule-modal').hidden = false;
+    resetScheduleForm();
     refreshScheduleModal();
 }
 
 function closeScheduleModal() {
     document.getElementById('schedule-modal').hidden = true;
     _scheduleTargetId = null;
+    _editingRuleId = null;
 }
 
 document.getElementById('btn-close-schedule').addEventListener('click', closeScheduleModal);
+
+document.getElementById('schedule-cancel-btn').addEventListener('click', resetScheduleForm);
 
 async function refreshScheduleModal() {
     if (!_scheduleTargetId) return;
@@ -232,11 +293,13 @@ async function refreshScheduleModal() {
     }
 
     list.innerHTML = rules.map(r => `
-        <div class="rule-item">
+        <div class="rule-item${_editingRuleId === r.id ? ' editing' : ''}">
             <span class="rule-label ${r.enabled ? '' : 'disabled'}">
                 ${DAY_LABELS[r.day_of_week] || r.day_of_week} ${fmt12(r.start_time)}\u2013${fmt12(r.end_time)}
             </span>
             <div class="rule-actions">
+                <button class="btn btn-sm btn-secondary" data-rule-action="edit" data-rule-id="${r.id}"
+                    data-day="${r.day_of_week}" data-start="${r.start_time}" data-end="${r.end_time}">\u270E</button>
                 <button class="btn btn-sm btn-secondary" data-rule-action="toggle" data-rule-id="${r.id}">${r.enabled ? '\u2611' : '\u2610'}</button>
                 <button class="btn btn-sm btn-danger" data-rule-action="delete" data-rule-id="${r.id}">\u2715</button>
             </div>
@@ -248,10 +311,23 @@ document.getElementById('schedule-rules-list').addEventListener('click', async (
     const btn = e.target.closest('[data-rule-action]');
     if (!btn) return;
     const ruleId = btn.dataset.ruleId;
-    if (btn.dataset.ruleAction === 'toggle') {
+    const action = btn.dataset.ruleAction;
+
+    if (action === 'edit') {
+        _editingRuleId = parseInt(ruleId);
+        document.getElementById('rule-day').value = btn.dataset.day;
+        setTimePicker('rule-start', btn.dataset.start);
+        setTimePicker('rule-end', btn.dataset.end);
+        document.getElementById('schedule-submit-btn').textContent = 'Save';
+        document.getElementById('schedule-cancel-btn').hidden = false;
+        refreshScheduleModal();
+        return;
+    }
+    if (action === 'toggle') {
         await api(`/api/schedules/${ruleId}/toggle`, 'PATCH');
-    } else if (btn.dataset.ruleAction === 'delete') {
+    } else if (action === 'delete') {
         await api(`/api/schedules/${ruleId}`, 'DELETE');
+        if (_editingRuleId === parseInt(ruleId)) resetScheduleForm();
     }
     await refreshScheduleModal();
     await refreshTargets();
@@ -261,14 +337,19 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
     e.preventDefault();
     if (!_scheduleTargetId) return;
     const day = document.getElementById('rule-day').value;
-    const start = document.getElementById('rule-start').value;
-    const end = document.getElementById('rule-end').value;
-    if (!start || !end) return;
-    await api(`/api/targets/${_scheduleTargetId}/schedules`, 'POST', {
-        day_of_week: day, start_time: start, end_time: end,
-    });
-    document.getElementById('rule-start').value = '';
-    document.getElementById('rule-end').value = '';
+    const start = getTimePicker('rule-start');
+    const end = getTimePicker('rule-end');
+
+    if (_editingRuleId) {
+        await api(`/api/schedules/${_editingRuleId}`, 'PUT', {
+            day_of_week: day, start_time: start, end_time: end,
+        });
+    } else {
+        await api(`/api/targets/${_scheduleTargetId}/schedules`, 'POST', {
+            day_of_week: day, start_time: start, end_time: end,
+        });
+    }
+    resetScheduleForm();
     await refreshScheduleModal();
     await refreshTargets();
 });
@@ -477,6 +558,7 @@ async function refreshLog() {
 // === Init ===
 
 async function init() {
+    initTimePickers();
     await Promise.all([refreshTargets(), refreshLog(), loadCachedDevices()]);
     setInterval(refreshTargets, 5000);
     setInterval(refreshLog, 15000);

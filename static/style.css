@@ -298,8 +298,7 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
     border-top: 1px solid #333;
 }
 
-.add-rule-form select,
-.add-rule-form input[type="time"] {
+.add-rule-form select {
     padding: 10px;
     border-radius: 8px;
     border: 1px solid #333;
@@ -309,6 +308,26 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 }
 
 .add-rule-form span { color: var(--text-dim); }
+
+.time-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.time-picker select {
+    padding: 10px 6px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.85rem;
+    min-width: 0;
+}
+
+.time-picker span { color: var(--text-dim); margin: 0 1px; }
+
+.rule-item.editing { background: rgba(30, 136, 229, 0.1); border-radius: 6px; padding: 8px 6px; }
 
 /* Log */
 .log-item {

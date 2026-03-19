@@ -73,10 +73,21 @@
                     <option value="sat">Saturday</option>
                     <option value="sun">Sunday</option>
                 </select>
-                <input type="time" id="rule-start" required>
+                <div class="time-picker">
+                    <select id="rule-start-h"></select>
+                    <span>:</span>
+                    <select id="rule-start-m"></select>
+                    <select id="rule-start-p"></select>
+                </div>
                 <span>to</span>
-                <input type="time" id="rule-end" required>
-                <button type="submit" class="btn btn-primary btn-sm">+ Add</button>
+                <div class="time-picker">
+                    <select id="rule-end-h"></select>
+                    <span>:</span>
+                    <select id="rule-end-m"></select>
+                    <select id="rule-end-p"></select>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm" id="schedule-submit-btn">+ Add</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="schedule-cancel-btn" hidden>Cancel</button>
             </form>
         </div>
     </div>
