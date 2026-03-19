@@ -133,7 +133,7 @@ function renderTargetCard(t) {
             <div class="target-info">
                 <div class="target-name-row">
                     <span class="target-name">${esc(displayName)}</span>
-                    <span class="target-desc" data-action="edit-desc">${desc ? esc(desc) : '<span class="dim">description</span>'}</span>
+                    <span class="target-desc" data-action="edit-desc">${desc ? esc(desc) : ''}</span>
                 </div>
                 <div class="target-details">${esc(ip)} &middot; ${esc(t.mac)}</div>
             </div>
