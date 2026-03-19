@@ -131,15 +131,15 @@ function renderTargetCard(t) {
     <div class="card target-card" data-id="${t.id}">
         <div class="target-header">
             <div class="target-info">
-                <div class="target-name">${esc(displayName)}</div>
+                <div class="target-name-row">
+                    <span class="target-name">${esc(displayName)}</span>
+                    <span class="target-desc" data-action="edit-desc">${desc ? esc(desc) : '<span class="dim">description</span>'}</span>
+                </div>
                 <div class="target-details">${esc(ip)} &middot; ${esc(t.mac)}</div>
             </div>
             <div class="status-badge ${statusClass}">
                 <span class="dot"></span> ${statusText}
             </div>
-        </div>
-        <div class="target-desc" data-action="edit-desc">
-            ${desc ? esc(desc) : '<span class="dim">Add description...</span>'}
         </div>
         <div class="${scheduleClass}" data-action="schedule" data-name="${esc(displayName)}">
             ${scheduleSummary

@@ -137,13 +137,19 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
     margin-bottom: 8px;
 }
 
+.target-name-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
 .target-name { font-size: 1.1rem; font-weight: 600; }
 .target-details { font-size: 0.8rem; color: var(--text-dim); margin-top: 2px; }
 
 .target-desc {
     font-size: 0.8rem;
     color: var(--text-dim);
-    padding: 4px 0 6px;
     cursor: pointer;
 }
 
