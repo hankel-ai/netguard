@@ -111,7 +111,7 @@ function renderTargetCard(t) {
                 `${DAY_LABELS[s.day_of_week] || s.day_of_week} ${fmt12(s.start_time)}\u2013${fmt12(s.end_time)}`
             ).join(', ');
         } else {
-            scheduleSummary = `${t.schedules.length} rule(s), all disabled`;
+            scheduleSummary = `${t.schedules.length} schedule(s), all disabled`;
         }
     }
 
