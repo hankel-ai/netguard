@@ -1,7 +1,7 @@
+import html
 import logging
 import re
 import socket
-import struct
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -13,26 +13,82 @@ from app.config import settings
 logger = logging.getLogger("netguard.scanner")
 
 
+def _ping_sweep(network_prefix: str):
+    """Send a fast ping sweep to wake up sleeping devices before ARP scan."""
+    try:
+        # fping is fastest, but fall back to parallel ping
+        subprocess.run(
+            ["fping", "-a", "-q", "-c1", "-t100", "-g", f"{network_prefix}.0/24"],
+            capture_output=True, timeout=10,
+        )
+    except FileNotFoundError:
+        # Fallback: use native ping in parallel via subprocess
+        try:
+            subprocess.run(
+                ["bash", "-c",
+                 f"for i in $(seq 1 254); do ping -c1 -W1 {network_prefix}.$i &>/dev/null & done; wait"],
+                capture_output=True, timeout=15,
+            )
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _read_arp_cache() -> list[dict]:
+    """Read the system ARP cache from /proc/net/arp for additional devices."""
+    devices = []
+    try:
+        with open("/proc/net/arp", "r") as f:
+            for line in f.readlines()[1:]:  # Skip header
+                parts = line.split()
+                if len(parts) >= 6 and parts[2] != "0x0":  # flags != incomplete
+                    ip = parts[0]
+                    mac = parts[3].lower()
+                    if mac != "00:00:00:00:00:00":
+                        devices.append({"mac": mac, "ip": ip})
+    except Exception:
+        pass
+    return devices
+
+
 def scan_network() -> list[dict]:
     """ARP scan the local /24 subnet. Returns list of {mac, ip}."""
     conf.verb = 0
-    network = settings.gateway_ip.rsplit(".", 1)[0] + ".0/24"
+    network_prefix = settings.gateway_ip.rsplit(".", 1)[0]
+    network = network_prefix + ".0/24"
     logger.info("Scanning %s", network)
-    ans, _ = srp(
-        Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=network),
-        timeout=5,
-        iface=settings.interface,
-    )
+
+    # Ping sweep first to wake sleeping devices (especially WiFi)
+    _ping_sweep(network_prefix)
+
+    # Send two ARP rounds for better coverage
+    seen = {}
+    for attempt in range(2):
+        ans, _ = srp(
+            Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=network),
+            timeout=4,
+            iface=settings.interface,
+        )
+        for sent, recv in ans:
+            mac = recv.hwsrc.lower()
+            ip = recv.psrc
+            seen[mac] = ip
+
+    # Also check system ARP cache for devices that responded to ping but not ARP broadcast
+    for dev in _read_arp_cache():
+        if dev["mac"] not in seen:
+            seen[dev["mac"]] = dev["ip"]
+
     # Filter out gateway and ourselves
     our_mac = get_if_hwaddr(settings.interface).lower()
     gateway_ip = settings.gateway_ip
     devices = []
-    for sent, recv in ans:
-        mac = recv.hwsrc.lower()
-        ip = recv.psrc
+    for mac, ip in seen.items():
         if mac == our_mac or ip == gateway_ip:
             continue
         devices.append({"mac": mac, "ip": ip})
+
     logger.info("Found %d devices (excluding gateway and self)", len(devices))
     return devices
 
@@ -173,7 +229,7 @@ def _ssdp_discover() -> dict[str, str]:
                     # Extract <friendlyName> from UPnP XML
                     m = re.search(r"<friendlyName>([^<]+)</friendlyName>", xml)
                     if m:
-                        results[ip] = m.group(1).strip()
+                        results[ip] = html.unescape(m.group(1).strip())
             except Exception:
                 pass
 
