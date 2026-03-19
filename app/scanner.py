@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from scapy.all import Ether, ARP, srp, conf, get_if_hwaddr
 
 from app.config import settings
+from app.oui import lookup_vendor
 
 logger = logging.getLogger("netguard.scanner")
 
@@ -291,6 +292,12 @@ def full_scan() -> list[dict]:
                 dev["hostname"] = future.result()
             except Exception:
                 dev["hostname"] = None
+
+    # Resolve vendor and device type from MAC OUI
+    for dev in devices:
+        vendor, device_type = lookup_vendor(dev["mac"])
+        dev["vendor"] = vendor
+        dev["device_type"] = device_type
 
     # Sort: devices with hostnames first, then by IP
     devices.sort(key=lambda d: (d["hostname"] is None, d["ip"]))

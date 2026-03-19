@@ -37,12 +37,16 @@ CREATE TABLE IF NOT EXISTS lan_devices (
     mac TEXT PRIMARY KEY COLLATE NOCASE,
     ip TEXT,
     hostname TEXT,
+    vendor TEXT,
+    device_type TEXT,
     last_seen TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 
 MIGRATIONS = [
     "ALTER TABLE targets ADD COLUMN description TEXT",
+    "ALTER TABLE lan_devices ADD COLUMN vendor TEXT",
+    "ALTER TABLE lan_devices ADD COLUMN device_type TEXT",
 ]
 
 
@@ -151,15 +155,19 @@ async def add_log(action: str, source: str, target_id: int | None = None):
 
 # --- LAN Device Cache ---
 
-async def upsert_lan_device(mac: str, ip: str | None, hostname: str | None):
+async def upsert_lan_device(mac: str, ip: str | None, hostname: str | None,
+                            vendor: str | None = None, device_type: str | None = None):
     db = await get_db()
     await db.execute(
-        "INSERT INTO lan_devices (mac, ip, hostname, last_seen) VALUES (?, ?, ?, datetime('now')) "
+        "INSERT INTO lan_devices (mac, ip, hostname, vendor, device_type, last_seen) "
+        "VALUES (?, ?, ?, ?, ?, datetime('now')) "
         "ON CONFLICT(mac) DO UPDATE SET "
         "ip = COALESCE(excluded.ip, lan_devices.ip), "
         "hostname = COALESCE(excluded.hostname, lan_devices.hostname), "
+        "vendor = COALESCE(excluded.vendor, lan_devices.vendor), "
+        "device_type = COALESCE(excluded.device_type, lan_devices.device_type), "
         "last_seen = datetime('now')",
-        (mac.lower(), ip, hostname),
+        (mac.lower(), ip, hostname, vendor, device_type),
     )
     await db.commit()
 

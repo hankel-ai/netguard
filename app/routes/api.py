@@ -12,6 +12,7 @@ from app.database import (
 )
 from app.scheduler import evaluate_schedule_for_target
 from app.scanner import full_scan, resolve_mac, resolve_hostname
+from app.oui import lookup_vendor
 
 router = APIRouter(prefix="/api")
 
@@ -74,6 +75,10 @@ async def list_targets(request: Request):
         t["is_blocking"] = blocker.is_blocking if blocker else False
         t["target_ip"] = blocker.target_ip if blocker else t.get("ip")
         t["schedules"] = await get_schedules_for_target(t["id"])
+        # Add vendor info from OUI lookup
+        vendor, device_type = lookup_vendor(t["mac"])
+        t["vendor"] = vendor
+        t["device_type"] = device_type
     return targets
 
 
@@ -272,7 +277,8 @@ async def scan_lan(request: Request):
     devices = await asyncio.to_thread(full_scan)
     # Upsert found devices into cache (preserves existing hostnames if new scan can't resolve)
     for dev in devices:
-        await upsert_lan_device(dev["mac"], dev["ip"], dev.get("hostname"))
+        await upsert_lan_device(dev["mac"], dev["ip"], dev.get("hostname"),
+                                dev.get("vendor"), dev.get("device_type"))
     # Return ALL cached devices, not just current scan results
     all_devices = await get_all_lan_devices()
     targets = await get_all_targets()

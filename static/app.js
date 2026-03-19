@@ -77,7 +77,7 @@ function renderTargets() {
     const list = document.getElementById('targets-list');
 
     const filtered = _targets.filter(t =>
-        matchesSearch(query, t.hostname, t.target_ip || t.ip, t.mac)
+        matchesSearch(query, t.hostname, t.target_ip || t.ip, t.mac, t.vendor, t.device_type)
     );
 
     if (_targets.length === 0) {
@@ -97,7 +97,7 @@ function renderTargetCard(t) {
     const blocked = t.is_blocking;
     const statusClass = blocked ? 'blocked' : 'unblocked';
     const statusText = blocked ? 'BLOCKED' : 'UNBLOCKED';
-    const displayName = t.hostname || 'Unknown Device';
+    const displayName = t.hostname || t.device_type || t.vendor || 'Unknown Device';
     const ip = t.target_ip || t.ip || '\u2014';
     const hasOverride = t.override !== 'none';
     const hasSchedules = t.schedules && t.schedules.length > 0;
@@ -135,7 +135,7 @@ function renderTargetCard(t) {
                     <span class="target-name">${esc(displayName)}</span>
                     <span class="target-desc" data-action="edit-desc">${desc ? esc(desc) : ''}</span>
                 </div>
-                <div class="target-details">${esc(ip)} &middot; ${esc(t.mac)}</div>
+                <div class="target-details">${esc(ip)} &middot; ${esc(t.mac)}${t.vendor ? ` &middot; ${esc(t.vendor)}` : ''}${t.device_type && t.device_type !== t.vendor ? ` (${esc(t.device_type)})` : ''}</div>
             </div>
             <div class="status-badge ${statusClass}">
                 <span class="dot"></span> ${statusText}
@@ -414,7 +414,7 @@ function renderScanList() {
     }
 
     const filtered = _scanResults.filter(d =>
-        matchesSearch(query, d.hostname, d.ip, d.mac)
+        matchesSearch(query, d.hostname, d.ip, d.mac, d.vendor, d.device_type)
     );
 
     if (filtered.length === 0) {
@@ -424,11 +424,14 @@ function renderScanList() {
 
     el.innerHTML = filtered.map((d, _) => {
         const realIdx = _scanResults.indexOf(d);
+        const name = d.hostname || d.device_type || d.vendor || null;
+        const vendorTag = d.vendor && d.vendor !== name ? ` &middot; ${esc(d.vendor)}` : '';
+        const typeTag = d.device_type && d.device_type !== name ? ` (${esc(d.device_type)})` : '';
         return `
         <div class="scan-device ${d.is_target ? 'already-added' : ''}">
             <div class="scan-device-info">
-                <div class="scan-device-name">${d.hostname ? esc(d.hostname) : '<em>Unknown</em>'}</div>
-                <div class="scan-device-details">${esc(d.ip)} &middot; ${esc(d.mac)}</div>
+                <div class="scan-device-name">${name ? esc(name) : '<em>Unknown</em>'}</div>
+                <div class="scan-device-details">${esc(d.ip)} &middot; ${esc(d.mac)}${vendorTag}${typeTag}</div>
             </div>
             ${d.is_target
                 ? '<span class="dim">Added</span>'
