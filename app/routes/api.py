@@ -8,6 +8,7 @@ from app.database import (
     get_all_targets, get_target, get_target_by_mac, add_target as db_add_target,
     remove_target as db_remove_target, update_target,
     get_schedules_for_target, get_schedule, add_log, get_db,
+    upsert_lan_device, get_all_lan_devices, get_lan_device_by_mac,
 )
 from app.scheduler import evaluate_schedule_for_target
 from app.scanner import full_scan, resolve_mac, resolve_hostname
@@ -32,6 +33,11 @@ class AddTargetRequest(BaseModel):
     ip: str
     mac: str | None = None
     hostname: str | None = None
+    force: bool = False
+
+
+class DescriptionUpdate(BaseModel):
+    description: str
 
 
 class ScheduleCreate(BaseModel):
@@ -84,6 +90,18 @@ async def add_target(body: AddTargetRequest, request: Request):
     # If no hostname provided, try to resolve it
     if not hostname:
         hostname = await asyncio.to_thread(resolve_hostname, body.ip)
+    # Check for changes vs cached device (unless force=True)
+    if not body.force:
+        cached = await get_lan_device_by_mac(mac)
+        if cached:
+            changes = []
+            if cached["hostname"] and hostname and cached["hostname"] != hostname:
+                changes.append(f"Hostname changed: {cached['hostname']} \u2192 {hostname}")
+            if cached["ip"] and body.ip and cached["ip"] != body.ip:
+                changes.append(f"IP changed: {cached['ip']} \u2192 {body.ip}")
+            if changes:
+                return {"ok": False, "confirm": True, "changes": changes,
+                        "mac": mac, "ip": body.ip, "hostname": hostname}
     existing = await get_target_by_mac(mac)
     if existing:
         return {"ok": False, "error": "Target with this MAC already exists"}
@@ -153,6 +171,16 @@ async def clear_override(target_id: int, request: Request):
         await update_target(target_id, is_blocking=0)
         await add_log("unblocked", "schedule", target_id=target_id)
     return {"ok": True, "is_blocking": blocker.is_blocking}
+
+
+@router.patch("/targets/{target_id}/description")
+async def set_description(target_id: int, body: DescriptionUpdate, request: Request):
+    require_auth(request)
+    target = await get_target(target_id)
+    if not target:
+        return {"ok": False, "error": "Not found"}
+    await update_target(target_id, description=body.description or None)
+    return {"ok": True}
 
 
 # --- Schedules ---
@@ -227,10 +255,24 @@ async def toggle_schedule(rule_id: int, request: Request):
 
 # --- LAN Scan ---
 
+@router.get("/lan-devices")
+async def list_lan_devices(request: Request):
+    require_auth(request)
+    devices = await get_all_lan_devices()
+    targets = await get_all_targets()
+    known_macs = {t["mac"].lower() for t in targets}
+    for dev in devices:
+        dev["is_target"] = dev["mac"].lower() in known_macs
+    return devices
+
+
 @router.post("/scan")
 async def scan_lan(request: Request):
     require_auth(request)
     devices = await asyncio.to_thread(full_scan)
+    # Cache results in DB
+    for dev in devices:
+        await upsert_lan_device(dev["mac"], dev["ip"], dev.get("hostname"))
     # Mark which are already targets
     targets = await get_all_targets()
     known_macs = {t["mac"].lower() for t in targets}

@@ -125,6 +125,8 @@ function renderTargetCard(t) {
     const blockPressed = t.override === 'block';
     const unblockPressed = t.override === 'unblock';
 
+    const desc = t.description || '';
+
     return `
     <div class="card target-card" data-id="${t.id}">
         <div class="target-header">
@@ -135,6 +137,9 @@ function renderTargetCard(t) {
             <div class="status-badge ${statusClass}">
                 <span class="dot"></span> ${statusText}
             </div>
+        </div>
+        <div class="target-desc" data-action="edit-desc">
+            ${desc ? esc(desc) : '<span class="dim">Add description...</span>'}
         </div>
         <div class="${scheduleClass}" data-action="schedule" data-name="${esc(displayName)}">
             ${scheduleSummary
@@ -160,6 +165,15 @@ document.getElementById('targets-list').addEventListener('click', async (e) => {
     const id = card.dataset.id;
     const action = btn.dataset.action;
 
+    if (action === 'edit-desc') {
+        const target = _targets.find(t => String(t.id) === id);
+        const current = target?.description || '';
+        const desc = prompt('Description:', current);
+        if (desc === null) return;
+        await api(`/api/targets/${id}/description`, 'PATCH', { description: desc });
+        await refreshTargets();
+        return;
+    }
     if (action === 'schedule') {
         openScheduleModal(id, btn.dataset.name);
         return;
@@ -255,6 +269,25 @@ let _scanning = false;
 
 document.getElementById('btn-scan').addEventListener('click', doScan);
 
+async function loadCachedDevices() {
+    const devices = await api('/api/lan-devices');
+    if (!devices || devices._error) return;
+    _scanResults = devices;
+    updateScanStatus();
+    renderScanList();
+}
+
+function updateScanStatus() {
+    const status = document.getElementById('scan-status');
+    if (_scanResults.length === 0) {
+        status.textContent = 'No cached devices. Hit "Scan Now" to discover.';
+        return;
+    }
+    const count = _scanResults.length;
+    const added = _scanResults.filter(d => d.is_target).length;
+    status.textContent = `${count} device${count !== 1 ? 's' : ''} (${added} already added)`;
+}
+
 async function doScan() {
     if (_scanning) return;
     _scanning = true;
@@ -263,7 +296,6 @@ async function doScan() {
     btn.disabled = true;
     btn.textContent = 'Scanning...';
     status.textContent = 'Scanning network...';
-    document.getElementById('scan-list').innerHTML = '';
 
     const devices = await api('/api/scan', 'POST');
     _scanning = false;
@@ -276,9 +308,7 @@ async function doScan() {
     }
 
     _scanResults = devices;
-    const count = devices.length;
-    const added = devices.filter(d => d.is_target).length;
-    status.textContent = `${count} device${count !== 1 ? 's' : ''} found (${added} already added)`;
+    updateScanStatus();
     renderScanList();
 }
 
@@ -329,6 +359,28 @@ document.getElementById('scan-list').addEventListener('click', async (e) => {
     const result = await api('/api/targets', 'POST', {
         mac: d.mac, ip: d.ip || null, hostname: d.hostname || null,
     });
+    // Change detected — ask user to confirm
+    if (result && result.confirm) {
+        const msg = 'Changes detected:\n' + result.changes.join('\n') + '\n\nAdd anyway?';
+        if (confirm(msg)) {
+            const forced = await api('/api/targets', 'POST', {
+                mac: result.mac, ip: result.ip, hostname: result.hostname, force: true,
+            });
+            if (forced && !forced._error && forced.ok) {
+                d.is_target = true;
+                renderScanList();
+                await refreshTargets();
+                await refreshLog();
+                return;
+            }
+            btn.textContent = forced?.error || 'Failed';
+            btn.disabled = false;
+            return;
+        }
+        btn.textContent = 'Add';
+        btn.disabled = false;
+        return;
+    }
     if (result && !result._error && result.ok) {
         d.is_target = true;
         renderScanList();
@@ -336,6 +388,7 @@ document.getElementById('scan-list').addEventListener('click', async (e) => {
         await refreshLog();
     } else {
         btn.textContent = result?.error || 'Failed';
+        btn.disabled = false;
     }
 });
 
@@ -352,6 +405,31 @@ document.getElementById('add-target-form').addEventListener('submit', async (e) 
     btn.textContent = 'Resolving...';
 
     const result = await api('/api/targets', 'POST', { ip });
+
+    // Change detected — ask user to confirm
+    if (result && result.confirm) {
+        btn.disabled = false;
+        btn.textContent = 'Add';
+        const msg = 'Changes detected:\n' + result.changes.join('\n') + '\n\nAdd anyway?';
+        if (confirm(msg)) {
+            btn.disabled = true;
+            btn.textContent = 'Adding...';
+            const forced = await api('/api/targets', 'POST', {
+                ip, mac: result.mac, hostname: result.hostname, force: true,
+            });
+            btn.disabled = false;
+            btn.textContent = 'Add';
+            if (forced && !forced._error && forced.ok) {
+                ipInput.value = '';
+                await refreshTargets();
+                await refreshLog();
+            } else {
+                alert(forced?.error || 'Failed to add target');
+            }
+        }
+        return;
+    }
+
     btn.disabled = false;
     btn.textContent = 'Add';
 
@@ -388,7 +466,7 @@ async function refreshLog() {
 // === Init ===
 
 async function init() {
-    await Promise.all([refreshTargets(), refreshLog()]);
+    await Promise.all([refreshTargets(), refreshLog(), loadCachedDevices()]);
     setInterval(refreshTargets, 5000);
     setInterval(refreshLog, 15000);
 }

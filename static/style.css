@@ -140,6 +140,15 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 .target-name { font-size: 1.1rem; font-weight: 600; }
 .target-details { font-size: 0.8rem; color: var(--text-dim); margin-top: 2px; }
 
+.target-desc {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    padding: 4px 0 6px;
+    cursor: pointer;
+}
+
+.target-desc:hover { color: var(--text); }
+
 .status-badge {
     display: inline-flex;
     align-items: center;

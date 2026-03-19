@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS targets (
     mac TEXT NOT NULL UNIQUE COLLATE NOCASE,
     ip TEXT,
     hostname TEXT,
+    description TEXT,
     is_blocking INTEGER NOT NULL DEFAULT 0,
     override TEXT NOT NULL DEFAULT 'none',
     last_seen TEXT,
@@ -31,7 +32,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
     source TEXT NOT NULL,
     target_id INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS lan_devices (
+    mac TEXT PRIMARY KEY COLLATE NOCASE,
+    ip TEXT,
+    hostname TEXT,
+    last_seen TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
+
+MIGRATIONS = [
+    "ALTER TABLE targets ADD COLUMN description TEXT",
+]
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -41,6 +53,12 @@ async def get_db() -> aiosqlite.Connection:
         _db.row_factory = aiosqlite.Row
         await _db.execute("PRAGMA foreign_keys = ON")
         await _db.executescript(SCHEMA)
+        # Run migrations (ignore errors for already-applied)
+        for sql in MIGRATIONS:
+            try:
+                await _db.execute(sql)
+            except Exception:
+                pass
         await _db.commit()
     return _db
 
@@ -129,3 +147,29 @@ async def add_log(action: str, source: str, target_id: int | None = None):
         (action, source, target_id),
     )
     await db.commit()
+
+
+# --- LAN Device Cache ---
+
+async def upsert_lan_device(mac: str, ip: str | None, hostname: str | None):
+    db = await get_db()
+    await db.execute(
+        "INSERT INTO lan_devices (mac, ip, hostname, last_seen) VALUES (?, ?, ?, datetime('now')) "
+        "ON CONFLICT(mac) DO UPDATE SET ip=excluded.ip, hostname=excluded.hostname, last_seen=datetime('now')",
+        (mac.lower(), ip, hostname),
+    )
+    await db.commit()
+
+
+async def get_all_lan_devices() -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM lan_devices ORDER BY hostname IS NULL, ip")
+    rows = await cursor.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_lan_device_by_mac(mac: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM lan_devices WHERE mac = ? COLLATE NOCASE", (mac,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None
