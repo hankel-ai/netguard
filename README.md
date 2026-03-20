@@ -27,6 +27,66 @@ Stops all spoofing threads, sends corrective ARP and NDP packets to restore the 
 - Linux host with wired Ethernet on the same LAN as the targets
 - Docker and Docker Compose
 
+## Cloning the Private Repo
+
+This is a private GitHub repository. You need to authenticate before you can clone it.
+
+### 1. Install Git
+
+```bash
+sudo apt update && sudo apt install -y git
+```
+
+### 2. Authenticate with GitHub
+
+The simplest method is the GitHub CLI:
+
+```bash
+# Install GitHub CLI
+sudo apt install -y gh        # Debian/Ubuntu
+# or: brew install gh          # macOS
+
+# Login (opens a browser or gives you a device code)
+gh auth login
+```
+
+Choose **GitHub.com**, **HTTPS**, and follow the prompts. This stores a token so git can access private repos.
+
+**Alternative — Personal Access Token (headless/SSH-only systems):**
+
+1. Go to https://github.com/settings/tokens?type=beta
+2. Click **Generate new token**
+3. Give it a name, set expiration, select the **netguard** repo, and grant **Contents: Read** permission
+4. Copy the token, then clone using it:
+
+```bash
+git clone https://github.com/hankel-ai/netguard.git
+```
+
+Or configure git to remember credentials so you only paste the token once:
+
+```bash
+git config --global credential.helper store
+git clone https://github.com/hankel-ai/netguard.git
+# Username: <your GitHub username>
+# Password: <paste the token>
+```
+
+### 3. Clone
+
+```bash
+git clone https://github.com/hankel-ai/netguard.git
+cd netguard
+```
+
+### Pulling Updates
+
+```bash
+cd netguard
+git pull
+docker compose up -d --build
+```
+
 ## Quick Start
 
 ```bash
@@ -175,8 +235,20 @@ Dark-themed, mobile-first dashboard with three tabs:
 - **Status indicator** — BLOCKED (red) or UNBLOCKED (green) per device
 - **Block / Unblock buttons** — manual override; active override button appears pressed/disabled
 - **Clear** — returns to schedule-driven mode (only shown when override is active)
+- **Monitor** — toggle per-device bandwidth monitoring (see below)
 - **Schedule bar** — green when not in a blocking window, red when actively blocking, grayed out when overridden
 - **Search** — filter targets by hostname, IP, or MAC
+
+### Traffic Monitoring
+
+Tap **MONITOR** on any target card to see its real-time internet usage. When enabled:
+
+- The device's traffic is ARP-spoofed through the host and counted via iptables accounting rules
+- Upload and download rates update every ~5 seconds
+- Cumulative totals (bytes up / bytes down) are shown
+- Works alongside blocking — if a device is blocked, you'll see the traffic it's *attempting* to send
+- Monitoring state persists across container restarts
+- Adds ~1ms latency to the monitored device's traffic (negligible for home use)
 
 ### LAN Devices Tab
 - **Scan Now** — ARP scans the local subnet, resolves hostnames via reverse DNS and NetBIOS
@@ -224,6 +296,8 @@ All endpoints (except login) require authentication via session cookie.
 | POST | `/api/targets/{id}/block` | Manual override: block |
 | POST | `/api/targets/{id}/unblock` | Manual override: unblock |
 | POST | `/api/targets/{id}/clear-override` | Return to schedule mode |
+| POST | `/api/targets/{id}/monitor` | Start traffic monitoring |
+| POST | `/api/targets/{id}/unmonitor` | Stop traffic monitoring |
 | GET | `/api/targets/{id}/schedules` | List schedules for target |
 | POST | `/api/targets/{id}/schedules` | Create rule `{day_of_week, start_time, end_time}` |
 | PUT | `/api/schedules/{id}` | Update rule |
@@ -247,6 +321,7 @@ netguard/
 │   ├── arp.py                  # ARP + NDP spoofing, iptables/ip6tables
 │   ├── scanner.py              # LAN scanning, MAC/hostname resolution
 │   ├── scheduler.py            # APScheduler, per-target schedule evaluation
+│   ├── traffic.py              # Per-device bandwidth monitoring via iptables
 │   ├── database.py             # aiosqlite, schema init, CRUD helpers
 │   └── routes/
 │       ├── api.py              # JSON API endpoints
