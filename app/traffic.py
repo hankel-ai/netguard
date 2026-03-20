@@ -32,10 +32,13 @@ class TrafficMonitor:
                 subprocess.run([cmd, "-I", "FORWARD", "1", "-j", CHAIN],
                                 capture_output=True)
         # Forwarding must be on for monitored (non-blocked) traffic to pass
-        subprocess.run(["sysctl", "-w", "net.ipv4.ip_forward=1"],
-                        capture_output=True)
-        subprocess.run(["sysctl", "-w", "net.ipv6.conf.all.forwarding=1"],
-                        capture_output=True)
+        try:
+            with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+                f.write("1")
+            with open("/proc/sys/net/ipv6/conf/all/forwarding", "w") as f:
+                f.write("1")
+        except OSError as e:
+            logger.warning("Could not enable IP forwarding: %s", e)
 
     def cleanup(self):
         self.stop()
