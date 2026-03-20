@@ -39,19 +39,23 @@ sudo apt update && sudo apt install -y git
 
 ### 2. Authenticate with GitHub
 
-The simplest method is the GitHub CLI (`gh`). It's not in the default Debian/Raspbian repos, so add the official GitHub apt source first:
+The simplest method is the GitHub CLI (`gh`).
+
+> **Important:** `gh` is NOT in the default Debian/Raspbian repos. Running `sudo apt install gh` without the steps below will fail with `Unable to locate package gh`. You must add GitHub's apt repository first.
+
+Run all of these commands in order:
 
 ```bash
-# Install dependencies
+# Step 1: Install dependencies
 sudo apt update && sudo apt install -y curl gpg
 
-# Add the GitHub CLI apt repository
+# Step 2: Add the GitHub CLI apt repository
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
   sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
   sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
 
-# Install gh
+# Step 3: Install gh (must run apt update again after adding the new repo)
 sudo apt update && sudo apt install -y gh
 ```
 
