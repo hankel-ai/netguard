@@ -109,15 +109,26 @@ class PiHoleClient:
     async def get_queries(
         self, client_ip: str | None = None, limit: int = 100
     ) -> list[dict]:
-        params: dict[str, Any] = {"length": limit}
+        # Fetch more than needed so we have enough after filtering
+        fetch_limit = limit * 5 if client_ip else limit
+        params: dict[str, Any] = {"length": fetch_limit}
         if client_ip:
             params["client"] = client_ip
         resp = await self._request("GET", "/api/queries", params=params)
         data = resp.json()
         queries = data.get("queries", data if isinstance(data, list) else [])
-        log.debug("Pi-hole queries for %s: got %d results (keys: %s)",
-                  client_ip, len(queries),
-                  queries[0].keys() if queries else "none")
+
+        # Pi-hole may ignore the client param — filter ourselves
+        if client_ip and queries:
+            def _match(q):
+                c = q.get("client")
+                if isinstance(c, dict):
+                    return c.get("ip") == client_ip
+                if isinstance(c, str):
+                    return c == client_ip
+                return q.get("client_ip") == client_ip
+            queries = [q for q in queries if _match(q)][:limit]
+
         return queries
 
     # ── groups ───────────────────────────────────────────────────
