@@ -40,7 +40,7 @@ class PiHoleClient:
         )
         resp.raise_for_status()
         data = resp.json()
-        log.debug("Pi-hole auth response: %s", data)
+        log.info("Pi-hole auth response: %s", data)
         session = data.get("session", {})
         if not session.get("valid"):
             raise RuntimeError("Pi-hole authentication failed")
