@@ -25,16 +25,30 @@ class PiHoleClient:
     # ── auth ─────────────────────────────────────────────────────
 
     async def _authenticate(self) -> None:
+        # Logout existing session first to avoid session conflicts
+        if self._sid:
+            try:
+                await self._http.delete(
+                    "/api/auth", headers={"X-FTL-SID": self._sid}
+                )
+            except Exception:
+                pass
+            self._sid = None
+
         resp = await self._http.post(
             "/api/auth", json={"password": self._password}
         )
         resp.raise_for_status()
         data = resp.json()
+        log.debug("Pi-hole auth response: %s", data)
         session = data.get("session", {})
         if not session.get("valid"):
             raise RuntimeError("Pi-hole authentication failed")
-        self._sid = session["sid"]
-        log.info("Authenticated with Pi-hole")
+        sid = session.get("sid")
+        if not sid or not isinstance(sid, str):
+            raise RuntimeError(f"Pi-hole returned invalid SID: {sid!r}")
+        self._sid = sid
+        log.info("Authenticated with Pi-hole (SID=%s...)", sid[:8])
 
     async def _request(
         self, method: str, path: str, **kwargs: Any
@@ -47,6 +61,7 @@ class PiHoleClient:
             method, path, headers=headers, **kwargs
         )
         if resp.status_code == 401:
+            self._sid = None
             await self._authenticate()
             headers["X-FTL-SID"] = self._sid
             resp = await self._http.request(
