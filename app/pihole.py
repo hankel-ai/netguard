@@ -74,6 +74,8 @@ class PiHoleClient:
             resp = await self._http.request(
                 method, path, headers=headers, **kwargs
             )
+        if resp.status_code >= 400:
+            log.warning("Pi-hole %s %s → %s: %s", method, path, resp.status_code, resp.text)
         resp.raise_for_status()
         return resp
 
