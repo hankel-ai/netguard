@@ -6,11 +6,11 @@ cd "$(dirname "$0")"
 echo "Stopping netguard..."
 docker compose down
 
-echo "Rebuilding image (no cache)..."
-docker compose build --no-cache
+echo "Rebuilding image..."
+docker compose build
 
 echo "Starting netguard..."
-docker compose up -d
+docker compose up
 
-echo "Done. Logs:"
-docker compose logs -f
+#echo "Done. Logs:"
+#docker compose logs -f
