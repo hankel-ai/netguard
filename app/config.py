@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     arp_interval: float = 2.0
     db_path: str = "/data/netguard.db"
     tz: str = "America/New_York"
+    pihole_url: str | None = None
+    pihole_password: str | None = None
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

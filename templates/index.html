@@ -10,6 +10,7 @@
     <div class="container">
         <header>
             <h1>NetGuard</h1>
+            <span id="pihole-badge" class="pihole-badge" hidden></span>
         </header>
 
         <!-- Tabs -->
@@ -50,6 +51,20 @@
         <!-- Tab: Activity Log -->
         <div id="tab-log" class="tab-content">
             <div id="log-list"></div>
+        </div>
+    </div>
+
+    <!-- DNS Queries Modal -->
+    <div id="dns-modal" class="modal" hidden>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="dns-modal-title">DNS Queries</h2>
+                <button class="btn btn-sm btn-secondary" id="btn-close-dns">&times;</button>
+            </div>
+            <div class="dns-search-bar">
+                <input type="text" id="dns-search" placeholder="Filter by domain...">
+            </div>
+            <div id="dns-query-list"></div>
         </div>
     </div>
 

@@ -11,8 +11,9 @@ from app.database import (
     upsert_lan_device, get_all_lan_devices, get_lan_device_by_mac,
 )
 from app.scheduler import evaluate_schedule_for_target
-from app.scanner import full_scan, resolve_mac, resolve_hostname
+from app.scanner import full_scan, fetch_pihole_devices, resolve_mac, resolve_hostname
 from app.oui import lookup_vendor
+from app.pihole import get_pihole_client
 
 router = APIRouter(prefix="/api")
 
@@ -84,6 +85,7 @@ async def list_targets(request: Request):
         t["target_ip"] = blocker.target_ip if blocker else t.get("ip")
         t["schedules"] = await get_schedules_for_target(t["id"])
         t["traffic"] = all_stats.get(t["id"])
+        t["dns_blocked"] = bool(t.get("dns_blocked"))
         # Add vendor info from OUI lookup
         vendor, device_type = lookup_vendor(t["mac"])
         t["vendor"] = vendor
@@ -134,6 +136,17 @@ async def delete_target(target_id: int, request: Request):
     target = await get_target(target_id)
     if not target:
         return {"ok": False, "error": "Not found"}
+    # Clean up DNS block if active
+    if target.get("dns_blocked"):
+        client = get_pihole_client()
+        if client:
+            blocker = _manager.get_blocker(target_id) if _manager else None
+            ip = blocker.target_ip if blocker else target.get("ip")
+            if ip:
+                try:
+                    await client.dns_unblock_device(ip)
+                except Exception:
+                    pass
     await asyncio.to_thread(_traffic.remove_target, target_id)
     await _manager.remove_target(target_id)
     await db_remove_target(target_id)
@@ -312,8 +325,27 @@ async def list_lan_devices(request: Request):
 @router.post("/scan")
 async def scan_lan(request: Request):
     require_auth(request)
-    devices = await asyncio.to_thread(full_scan)
-    # Upsert found devices into cache (preserves existing hostnames if new scan can't resolve)
+    # Run ARP scan and DHCP fetch in parallel
+    arp_task = asyncio.to_thread(full_scan)
+    dhcp_task = fetch_pihole_devices()
+    devices, dhcp_devices = await asyncio.gather(arp_task, dhcp_task)
+
+    # Merge DHCP devices into ARP results (DHCP fills gaps)
+    seen_macs = {d["mac"] for d in devices}
+    for dd in dhcp_devices:
+        if dd["mac"] in seen_macs:
+            # Update hostname if ARP scan didn't find one
+            for d in devices:
+                if d["mac"] == dd["mac"] and not d.get("hostname") and dd.get("hostname"):
+                    d["hostname"] = dd["hostname"]
+        else:
+            # Device only found via DHCP
+            vendor, device_type = lookup_vendor(dd["mac"])
+            dd["vendor"] = vendor
+            dd["device_type"] = device_type
+            devices.append(dd)
+
+    # Upsert found devices into cache
     for dev in devices:
         await upsert_lan_device(dev["mac"], dev["ip"], dev.get("hostname"),
                                 dev.get("vendor"), dev.get("device_type"))
@@ -339,3 +371,70 @@ async def get_log(request: Request):
     )
     rows = await cursor.fetchall()
     return [dict(r) for r in rows]
+
+
+# --- Pi-hole Integration ---
+
+@router.get("/pihole/status")
+async def pihole_status(request: Request):
+    require_auth(request)
+    client = get_pihole_client()
+    if not client:
+        return {"configured": False, "connected": False}
+    connected = await client.test_connection()
+    return {"configured": True, "connected": connected}
+
+
+@router.get("/targets/{target_id}/dns-queries")
+async def get_dns_queries(target_id: int, request: Request):
+    require_auth(request)
+    client = get_pihole_client()
+    if not client:
+        return {"ok": False, "error": "Pi-hole not configured"}
+    target = await get_target(target_id)
+    if not target:
+        return {"ok": False, "error": "Target not found"}
+    blocker = _manager.get_blocker(target_id) if _manager else None
+    ip = blocker.target_ip if blocker else target.get("ip")
+    if not ip:
+        return {"ok": False, "error": "No IP address for this target"}
+    queries = await client.get_queries(client_ip=ip, limit=100)
+    return {"ok": True, "queries": queries}
+
+
+@router.post("/targets/{target_id}/dns-block")
+async def dns_block_target(target_id: int, request: Request):
+    require_auth(request)
+    client = get_pihole_client()
+    if not client:
+        return {"ok": False, "error": "Pi-hole not configured"}
+    target = await get_target(target_id)
+    if not target:
+        return {"ok": False, "error": "Target not found"}
+    blocker = _manager.get_blocker(target_id) if _manager else None
+    ip = blocker.target_ip if blocker else target.get("ip")
+    if not ip:
+        return {"ok": False, "error": "No IP address for this target"}
+    await client.dns_block_device(ip)
+    await update_target(target_id, dns_blocked=1)
+    await add_log("DNS blocked", "manual", target_id=target_id)
+    return {"ok": True}
+
+
+@router.post("/targets/{target_id}/dns-unblock")
+async def dns_unblock_target(target_id: int, request: Request):
+    require_auth(request)
+    client = get_pihole_client()
+    if not client:
+        return {"ok": False, "error": "Pi-hole not configured"}
+    target = await get_target(target_id)
+    if not target:
+        return {"ok": False, "error": "Target not found"}
+    blocker = _manager.get_blocker(target_id) if _manager else None
+    ip = blocker.target_ip if blocker else target.get("ip")
+    if not ip:
+        return {"ok": False, "error": "No IP address for this target"}
+    await client.dns_unblock_device(ip)
+    await update_target(target_id, dns_blocked=0)
+    await add_log("DNS unblocked", "manual", target_id=target_id)
+    return {"ok": True}

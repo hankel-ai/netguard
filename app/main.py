@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.arp import BlockerManager
 from app.database import get_all_targets, update_target, close_db, add_log
+from app.pihole import get_pihole_client
 from app.routes.api import router as api_router, set_manager, set_traffic_monitor
 from app.routes.pages import router as pages_router
 from app.scheduler import init_scheduler, stop_scheduler
@@ -49,6 +50,29 @@ async def lifespan(app: FastAPI):
 
     traffic_monitor.start()
     init_scheduler(manager)
+
+    # Pi-hole integration (optional)
+    pihole = get_pihole_client()
+    if pihole:
+        try:
+            if await pihole.test_connection():
+                await pihole.ensure_blocking_group()
+                # Restore DNS blocks
+                for t in targets:
+                    if t.get("dns_blocked"):
+                        blocker = manager.get_blocker(t["id"])
+                        ip = blocker.target_ip if blocker else t.get("ip")
+                        if ip:
+                            await pihole.dns_block_device(ip)
+                            logger.info("Restored DNS block for target %d (%s)", t["id"], ip)
+                logger.info("Pi-hole integration active")
+            else:
+                logger.warning("Pi-hole configured but connection failed")
+        except Exception:
+            logger.warning("Pi-hole setup failed", exc_info=True)
+    else:
+        logger.info("Pi-hole not configured — skipping")
+
     logger.info("NetGuard ready (%d targets loaded)", len(targets))
 
     yield
@@ -58,8 +82,23 @@ async def lifespan(app: FastAPI):
     stop_scheduler()
     await asyncio.to_thread(traffic_monitor.cleanup)
     await manager.shutdown()
+
+    # DNS unblock all
+    pihole = get_pihole_client()
+    if pihole:
+        try:
+            for t in await get_all_targets():
+                if t.get("dns_blocked"):
+                    blocker = manager.get_blocker(t["id"])
+                    ip = blocker.target_ip if blocker else t.get("ip")
+                    if ip:
+                        await pihole.dns_unblock_device(ip)
+            await pihole.close()
+        except Exception:
+            logger.warning("Pi-hole shutdown cleanup failed", exc_info=True)
+
     for t in await get_all_targets():
-        await update_target(t["id"], is_blocking=0, override="none")
+        await update_target(t["id"], is_blocking=0, override="none", dns_blocked=0)
     await add_log("all unblocked on shutdown", "system")
     await close_db()
     logger.info("NetGuard stopped cleanly")

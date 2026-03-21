@@ -422,3 +422,100 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 .scan-device.already-added { opacity: 0.5; }
 .scan-device-name { font-weight: 500; font-size: 0.9rem; }
 .scan-device-details { font-size: 0.8rem; color: var(--text-dim); }
+
+/* Pi-hole badge */
+.pihole-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+
+.pihole-badge.connected { background: rgba(0, 200, 83, 0.2); color: var(--green); }
+.pihole-badge.disconnected { background: rgba(233, 69, 96, 0.2); color: var(--red); }
+
+/* DNS block button */
+.btn-dns-active {
+    background: var(--orange);
+    color: #fff;
+}
+
+/* DNS blocked badge */
+.status-badge.dns-blocked {
+    background: rgba(255, 152, 0, 0.2);
+    color: var(--orange);
+}
+
+/* DNS modal */
+.dns-search-bar {
+    margin-bottom: 12px;
+}
+
+.dns-search-bar input {
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.85rem;
+}
+
+.dns-search-bar input::placeholder { color: var(--text-dim); }
+.dns-search-bar input:focus { outline: none; border-color: var(--blue); }
+
+.dns-query-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid #2a2a3e;
+    font-size: 0.8rem;
+    gap: 8px;
+}
+
+.dns-query-item:last-child { border-bottom: none; }
+
+.dns-query-domain {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+}
+
+.dns-query-time {
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.dns-query-type {
+    color: var(--text-dim);
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 4px;
+}
+
+.dns-query-status {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.dns-query-status.forwarded { background: rgba(0, 200, 83, 0.15); color: var(--green); }
+.dns-query-status.blocked { background: rgba(233, 69, 96, 0.15); color: var(--red); }
+.dns-query-status.cached { background: rgba(30, 136, 229, 0.15); color: var(--blue); }
+
+/* Status badges container */
+.status-badges {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}

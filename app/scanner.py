@@ -269,6 +269,28 @@ def resolve_hostname(ip: str) -> str | None:
     return None
 
 
+async def fetch_pihole_devices() -> list[dict]:
+    """Fetch device list from Pi-hole DHCP leases. Returns list of {mac, ip, hostname}."""
+    from app.pihole import get_pihole_client
+    client = get_pihole_client()
+    if not client:
+        return []
+    try:
+        leases = await client.get_dhcp_leases()
+        devices = []
+        for lease in leases:
+            mac = (lease.get("hwaddr") or lease.get("mac") or "").lower()
+            ip = lease.get("ip") or lease.get("address") or ""
+            hostname = lease.get("name") or lease.get("hostname") or None
+            if mac and ip:
+                devices.append({"mac": mac, "ip": ip, "hostname": hostname})
+        logger.info("Pi-hole DHCP: %d leases", len(devices))
+        return devices
+    except Exception:
+        logger.warning("Failed to fetch Pi-hole DHCP leases", exc_info=True)
+        return []
+
+
 def full_scan() -> list[dict]:
     """Scan network and resolve hostnames in parallel."""
     global _ssdp_names

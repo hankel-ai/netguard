@@ -52,6 +52,21 @@ function fmt12(time24) {
     return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
 }
 
+// === Pi-hole state ===
+let _piholeConnected = false;
+
+async function checkPiholeStatus() {
+    const status = await api('/api/pihole/status');
+    if (!status || status._error) return;
+    _piholeConnected = status.configured && status.connected;
+    const badge = document.getElementById('pihole-badge');
+    if (status.configured) {
+        badge.hidden = false;
+        badge.className = 'pihole-badge ' + (_piholeConnected ? 'connected' : 'disconnected');
+        badge.textContent = _piholeConnected ? 'Pi-hole connected' : 'Pi-hole disconnected';
+    }
+}
+
 // === Tabs ===
 
 document.querySelector('.tabs').addEventListener('click', (e) => {
@@ -108,6 +123,7 @@ function renderTargets() {
 
 function renderTargetCard(t) {
     const blocked = t.is_blocking;
+    const dnsBlocked = t.dns_blocked;
     const monitoring = t.is_monitoring;
     const statusClass = blocked ? 'blocked' : 'unblocked';
     const statusText = blocked ? 'BLOCKED' : 'UNBLOCKED';
@@ -155,6 +171,20 @@ function renderTargetCard(t) {
         trafficHtml = '<div class="traffic-stats dim">Monitoring... waiting for data</div>';
     }
 
+    // Status badges (ARP + optional DNS)
+    let badgesHtml = `<div class="status-badge ${statusClass}"><span class="dot"></span> ${statusText}</div>`;
+    if (dnsBlocked) {
+        badgesHtml += `<div class="status-badge dns-blocked"><span class="dot"></span> DNS</div>`;
+    }
+
+    // Pi-hole buttons (only when connected)
+    let piholeButtons = '';
+    if (_piholeConnected) {
+        piholeButtons = `
+            <button class="btn btn-sm${dnsBlocked ? ' btn-dns-active' : ' btn-secondary'}" data-action="${dnsBlocked ? 'dns-unblock' : 'dns-block'}">${dnsBlocked ? 'DNS BLOCKED' : 'DNS BLOCK'}</button>
+            <button class="btn btn-sm btn-secondary" data-action="dns-queries" data-name="${esc(displayName)}">DNS</button>`;
+    }
+
     return `
     <div class="card target-card" data-id="${t.id}">
         <div class="target-header">
@@ -165,8 +195,8 @@ function renderTargetCard(t) {
                 </div>
                 <div class="target-details">${esc(ip)} &middot; ${esc(t.mac)}${t.vendor ? ` &middot; ${esc(t.vendor)}` : ''}${t.device_type && t.device_type !== t.vendor ? ` (${esc(t.device_type)})` : ''}</div>
             </div>
-            <div class="status-badge ${statusClass}">
-                <span class="dot"></span> ${statusText}
+            <div class="status-badges">
+                ${badgesHtml}
             </div>
         </div>${trafficHtml}
         <div class="${scheduleClass}" data-action="schedule" data-name="${esc(displayName)}">
@@ -180,6 +210,7 @@ function renderTargetCard(t) {
             <button class="btn btn-success btn-sm${unblockPressed ? ' btn-pressed' : ''}" data-action="unblock"${unblockPressed ? ' disabled' : ''}>UNBLOCK</button>
             ${hasOverride ? '<button class="btn btn-secondary btn-sm" data-action="clear-override">CLEAR</button>' : ''}
             <button class="btn btn-sm${monitoring ? ' btn-monitor-active' : ' btn-secondary'}" data-action="${monitoring ? 'unmonitor' : 'monitor'}">${monitoring ? 'MONITORING' : 'MONITOR'}</button>
+            ${piholeButtons}
             <button class="btn btn-sm btn-danger" data-action="delete" data-name="${esc(displayName)}">\u2715</button>
         </div>
     </div>`;
@@ -216,6 +247,10 @@ document.getElementById('targets-list').addEventListener('click', async (e) => {
     }
     if (action === 'schedule') {
         openScheduleModal(id, btn.dataset.name);
+        return;
+    }
+    if (action === 'dns-queries') {
+        openDnsModal(id, btn.dataset.name);
         return;
     }
     if (action === 'delete') {
@@ -382,6 +417,90 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
     await refreshScheduleModal();
     await refreshTargets();
 });
+
+// === DNS Queries Modal ===
+
+let _dnsTargetId = null;
+let _dnsRefreshTimer = null;
+
+function openDnsModal(targetId, name) {
+    _dnsTargetId = targetId;
+    document.getElementById('dns-modal-title').textContent = `DNS: ${name}`;
+    document.getElementById('dns-modal').hidden = false;
+    document.getElementById('dns-search').value = '';
+    refreshDnsQueries();
+    _dnsRefreshTimer = setInterval(refreshDnsQueries, 10000);
+}
+
+function closeDnsModal() {
+    document.getElementById('dns-modal').hidden = true;
+    _dnsTargetId = null;
+    if (_dnsRefreshTimer) { clearInterval(_dnsRefreshTimer); _dnsRefreshTimer = null; }
+}
+
+document.getElementById('btn-close-dns').addEventListener('click', closeDnsModal);
+document.getElementById('dns-search').addEventListener('input', () => renderDnsQueries());
+
+let _dnsQueries = [];
+
+async function refreshDnsQueries() {
+    if (!_dnsTargetId) return;
+    const result = await api(`/api/targets/${_dnsTargetId}/dns-queries`);
+    if (!result || result._error || !result.ok) return;
+    _dnsQueries = result.queries || [];
+    renderDnsQueries();
+}
+
+function dnsStatusClass(status) {
+    if (!status) return '';
+    const s = String(status).toLowerCase();
+    if (s.includes('forward') || s.includes('answer') || s === '2' || s === '3') return 'forwarded';
+    if (s.includes('block') || s.includes('deny') || s.includes('gravity') || s === '1') return 'blocked';
+    if (s.includes('cache') || s === '4') return 'cached';
+    return '';
+}
+
+function dnsStatusLabel(status) {
+    if (!status) return '';
+    const s = String(status).toLowerCase();
+    if (s.includes('forward') || s === '2' || s === '3') return 'forwarded';
+    if (s.includes('block') || s.includes('deny') || s.includes('gravity') || s === '1') return 'blocked';
+    if (s.includes('cache') || s === '4') return 'cached';
+    return s;
+}
+
+function renderDnsQueries() {
+    const filter = (document.getElementById('dns-search').value || '').toLowerCase();
+    const list = document.getElementById('dns-query-list');
+
+    const filtered = _dnsQueries.filter(q => {
+        const domain = q.domain || q.name || '';
+        return !filter || domain.toLowerCase().includes(filter);
+    });
+
+    if (filtered.length === 0) {
+        list.innerHTML = '<p class="dim">No DNS queries found.</p>';
+        return;
+    }
+
+    list.innerHTML = filtered.slice(0, 200).map(q => {
+        const domain = q.domain || q.name || '?';
+        const type = q.type || '';
+        const status = q.status || '';
+        const ts = q.timestamp || q.time || 0;
+        const date = typeof ts === 'number' && ts > 0 ? new Date(ts * 1000) : null;
+        const timeStr = date ? date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true }) : '';
+        const sc = dnsStatusClass(status);
+        const sl = dnsStatusLabel(status);
+        return `
+        <div class="dns-query-item">
+            <span class="dns-query-time">${timeStr}</span>
+            <span class="dns-query-domain">${esc(domain)}</span>
+            <span class="dns-query-type">${esc(type)}</span>
+            <span class="dns-query-status ${sc}">${sl}</span>
+        </div>`;
+    }).join('');
+}
 
 // === LAN Scan Tab ===
 
@@ -591,7 +710,7 @@ async function refreshLog() {
 
 async function init() {
     initTimePickers();
-    await Promise.all([refreshTargets(), refreshLog(), loadCachedDevices()]);
+    await Promise.all([checkPiholeStatus(), refreshTargets(), refreshLog(), loadCachedDevices()]);
     setInterval(refreshTargets, 5000);
     setInterval(refreshLog, 15000);
 }
