@@ -394,12 +394,17 @@ async def get_dns_queries(target_id: int, request: Request):
     target = await get_target(target_id)
     if not target:
         return {"ok": False, "error": "Target not found"}
+    # Resolve IP: blocker (live ARP) → DB target → LAN device cache
     blocker = _manager.get_blocker(target_id) if _manager else None
     ip = blocker.target_ip if blocker else target.get("ip")
     if not ip:
-        return {"ok": False, "error": "No IP address for this target"}
+        cached = await get_lan_device_by_mac(target["mac"])
+        if cached:
+            ip = cached.get("ip")
+    if not ip:
+        return {"ok": False, "error": "No IP address for this target — run a scan first"}
     queries = await client.get_queries(client_ip=ip, limit=100)
-    return {"ok": True, "queries": queries}
+    return {"ok": True, "queries": queries, "client_ip": ip}
 
 
 @router.post("/targets/{target_id}/dns-block")

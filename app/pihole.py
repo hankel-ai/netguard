@@ -114,7 +114,11 @@ class PiHoleClient:
             params["client"] = client_ip
         resp = await self._request("GET", "/api/queries", params=params)
         data = resp.json()
-        return data.get("queries", data if isinstance(data, list) else [])
+        queries = data.get("queries", data if isinstance(data, list) else [])
+        log.debug("Pi-hole queries for %s: got %d results (keys: %s)",
+                  client_ip, len(queries),
+                  queries[0].keys() if queries else "none")
+        return queries
 
     # ── groups ───────────────────────────────────────────────────
 
