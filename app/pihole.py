@@ -15,10 +15,11 @@ _client: "PiHoleClient | None" = None
 class PiHoleClient:
     """Async client for the Pi-hole v6 REST API."""
 
-    def __init__(self, url: str, password: str):
+    def __init__(self, url: str, password: str | None):
         self._base = url.rstrip("/")
-        self._password = password
+        self._password = password or ""
         self._sid: str | None = None
+        self._no_auth = False  # True when Pi-hole has no password set
         self._http = httpx.AsyncClient(base_url=self._base, timeout=10.0)
         self._blocking_group_id: int | None = None
 
@@ -40,30 +41,36 @@ class PiHoleClient:
         )
         resp.raise_for_status()
         data = resp.json()
-        log.info("Pi-hole auth response: %s", data)
         session = data.get("session", {})
         if not session.get("valid"):
             raise RuntimeError("Pi-hole authentication failed")
         sid = session.get("sid")
-        if not sid or not isinstance(sid, str):
-            raise RuntimeError(f"Pi-hole returned invalid SID: {sid!r}")
-        self._sid = sid
-        log.info("Authenticated with Pi-hole (SID=%s...)", sid[:8])
+        if sid and isinstance(sid, str):
+            self._sid = sid
+            self._no_auth = False
+            log.info("Authenticated with Pi-hole (SID=%s...)", sid[:8])
+        else:
+            # No password set — API is open, no SID needed
+            self._no_auth = True
+            log.info("Pi-hole has no password — using open API access")
 
     async def _request(
         self, method: str, path: str, **kwargs: Any
     ) -> httpx.Response:
-        if self._sid is None:
+        if not self._no_auth and self._sid is None:
             await self._authenticate()
         headers = kwargs.pop("headers", {})
-        headers["X-FTL-SID"] = self._sid
+        if self._sid:
+            headers["X-FTL-SID"] = self._sid
         resp = await self._http.request(
             method, path, headers=headers, **kwargs
         )
         if resp.status_code == 401:
             self._sid = None
+            self._no_auth = False
             await self._authenticate()
-            headers["X-FTL-SID"] = self._sid
+            if self._sid:
+                headers["X-FTL-SID"] = self._sid
             resp = await self._http.request(
                 method, path, headers=headers, **kwargs
             )
@@ -246,7 +253,7 @@ def get_pihole_client() -> PiHoleClient | None:
     global _client
     if _client is not None:
         return _client
-    if not settings.pihole_url or not settings.pihole_password:
+    if not settings.pihole_url:
         return None
     _client = PiHoleClient(settings.pihole_url, settings.pihole_password)
     return _client
