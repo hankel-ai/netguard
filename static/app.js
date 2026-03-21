@@ -257,6 +257,10 @@ document.getElementById('targets-list').addEventListener('click', async (e) => {
         const name = btn.dataset.name || 'this target';
         if (!confirm(`Remove "${name}"? This will unblock it and delete all its schedules.`)) return;
         await api(`/api/targets/${id}`, 'DELETE');
+        await refreshTargets();
+        await refreshLog();
+        await loadCachedDevices();
+        return;
     } else {
         btn.disabled = true;
         btn.textContent = '...';
@@ -421,11 +425,23 @@ document.getElementById('schedule-form').addEventListener('submit', async (e) =>
 // === DNS Queries Modal ===
 
 let _dnsTargetId = null;
+let _dnsIp = null;
 let _dnsRefreshTimer = null;
 
 function openDnsModal(targetId, name) {
     _dnsTargetId = targetId;
+    _dnsIp = null;
     document.getElementById('dns-modal-title').textContent = `DNS: ${name}`;
+    document.getElementById('dns-modal').hidden = false;
+    document.getElementById('dns-search').value = '';
+    refreshDnsQueries();
+    _dnsRefreshTimer = setInterval(refreshDnsQueries, 10000);
+}
+
+function openDnsModalByIp(ip, name) {
+    _dnsTargetId = null;
+    _dnsIp = ip;
+    document.getElementById('dns-modal-title').textContent = `DNS: ${name || ip}`;
     document.getElementById('dns-modal').hidden = false;
     document.getElementById('dns-search').value = '';
     refreshDnsQueries();
@@ -435,6 +451,7 @@ function openDnsModal(targetId, name) {
 function closeDnsModal() {
     document.getElementById('dns-modal').hidden = true;
     _dnsTargetId = null;
+    _dnsIp = null;
     if (_dnsRefreshTimer) { clearInterval(_dnsRefreshTimer); _dnsRefreshTimer = null; }
 }
 
@@ -444,8 +461,11 @@ document.getElementById('dns-search').addEventListener('input', () => renderDnsQ
 let _dnsQueries = [];
 
 async function refreshDnsQueries() {
-    if (!_dnsTargetId) return;
-    const result = await api(`/api/targets/${_dnsTargetId}/dns-queries`);
+    if (!_dnsTargetId && !_dnsIp) return;
+    const url = _dnsTargetId
+        ? `/api/targets/${_dnsTargetId}/dns-queries`
+        : `/api/dns-queries?ip=${encodeURIComponent(_dnsIp)}`;
+    const result = await api(url);
     if (!result || result._error || !result.ok) return;
     _dnsQueries = result.queries || [];
     renderDnsQueries();
@@ -575,22 +595,33 @@ function renderScanList() {
         const name = d.hostname || d.device_type || d.vendor || null;
         const vendorTag = d.vendor && d.vendor !== name ? ` &middot; ${esc(d.vendor)}` : '';
         const typeTag = d.device_type && d.device_type !== name ? ` (${esc(d.device_type)})` : '';
+        const dnsBtn = _piholeConnected && d.ip
+            ? `<button class="btn btn-sm btn-secondary" data-dns-ip="${esc(d.ip)}" data-dns-name="${esc(name || d.ip)}">DNS</button>`
+            : '';
         return `
         <div class="scan-device ${d.is_target ? 'already-added' : ''}">
             <div class="scan-device-info">
                 <div class="scan-device-name">${name ? esc(name) : '<em>Unknown</em>'}</div>
                 <div class="scan-device-details">${esc(d.ip)} &middot; ${esc(d.mac)}${vendorTag}${typeTag}</div>
             </div>
-            ${d.is_target
-                ? '<span class="dim">Added</span>'
-                : `<button class="btn btn-primary btn-sm" data-scan-idx="${realIdx}">Add</button>`
-            }
+            <div class="scan-device-actions">
+                ${dnsBtn}
+                ${d.is_target
+                    ? '<span class="dim">Added</span>'
+                    : `<button class="btn btn-primary btn-sm" data-scan-idx="${realIdx}">Add</button>`
+                }
+            </div>
         </div>`;
     }).join('');
 }
 
 // Event delegation for scan results
 document.getElementById('scan-list').addEventListener('click', async (e) => {
+    const dnsBtn = e.target.closest('[data-dns-ip]');
+    if (dnsBtn) {
+        openDnsModalByIp(dnsBtn.dataset.dnsIp, dnsBtn.dataset.dnsName);
+        return;
+    }
     const btn = e.target.closest('[data-scan-idx]');
     if (!btn) return;
     const idx = parseInt(btn.dataset.scanIdx);

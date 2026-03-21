@@ -385,6 +385,17 @@ async def pihole_status(request: Request):
     return {"configured": True, "connected": connected}
 
 
+@router.get("/dns-queries")
+async def get_dns_queries_by_ip(request: Request, ip: str):
+    """DNS queries for any device by IP (no target required)."""
+    require_auth(request)
+    client = get_pihole_client()
+    if not client:
+        return {"ok": False, "error": "Pi-hole not configured"}
+    queries = await client.get_queries(client_ip=ip, limit=100)
+    return {"ok": True, "queries": queries, "client_ip": ip}
+
+
 @router.get("/targets/{target_id}/dns-queries")
 async def get_dns_queries(target_id: int, request: Request):
     require_auth(request)

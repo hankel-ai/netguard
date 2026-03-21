@@ -422,6 +422,7 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 .scan-device.already-added { opacity: 0.5; }
 .scan-device-name { font-weight: 500; font-size: 0.9rem; }
 .scan-device-details { font-size: 0.8rem; color: var(--text-dim); }
+.scan-device-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 
 /* Pi-hole badge */
 .pihole-badge {
