@@ -16,8 +16,8 @@ _manager = None  # BlockerManager, set by init_scheduler
 DAY_MAP = {
     "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
 }
-WEEKDAY_DAYS = {0, 1, 2, 3, 4}
-WEEKEND_DAYS = {5, 6}
+WEEKDAY_DAYS = {0, 1, 2, 3, 6}  # Mon-Thu + Sun (school nights)
+WEEKEND_DAYS = {4, 5}            # Fri-Sat (weekend nights)
 
 
 def _day_matches(rule_day: str, weekday: int) -> bool:
