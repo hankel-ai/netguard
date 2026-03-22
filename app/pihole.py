@@ -109,8 +109,8 @@ class PiHoleClient:
     async def get_queries(
         self, client_ip: str | None = None, client_name: str | None = None, limit: int = 100
     ) -> list[dict]:
-        # Fetch with a large window — Pi-hole may ignore the client param
-        fetch_limit = limit * 20 if client_ip else limit
+        # Fetch more than needed so we have enough after filtering
+        fetch_limit = limit * 5 if client_ip else limit
         params: dict[str, Any] = {"length": fetch_limit}
         if client_ip:
             params["client"] = client_ip
@@ -126,7 +126,7 @@ class PiHoleClient:
                 if isinstance(c, dict):
                     if c.get("ip") == client_ip:
                         return True
-                    if name_lower and c.get("name", "").lower() == name_lower:
+                    if name_lower and (c.get("name") or "").lower() == name_lower:
                         return True
                     return False
                 if isinstance(c, str):
