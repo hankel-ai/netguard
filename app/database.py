@@ -186,3 +186,10 @@ async def get_lan_device_by_mac(mac: str) -> dict | None:
     cursor = await db.execute("SELECT * FROM lan_devices WHERE mac = ? COLLATE NOCASE", (mac,))
     row = await cursor.fetchone()
     return dict(row) if row else None
+
+
+async def get_lan_device_by_ip(ip: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM lan_devices WHERE ip = ?", (ip,))
+    row = await cursor.fetchone()
+    return dict(row) if row else None

@@ -8,7 +8,7 @@ from app.database import (
     get_all_targets, get_target, get_target_by_mac, add_target as db_add_target,
     remove_target as db_remove_target, update_target,
     get_schedules_for_target, get_schedule, add_log, get_db,
-    upsert_lan_device, get_all_lan_devices, get_lan_device_by_mac,
+    upsert_lan_device, get_all_lan_devices, get_lan_device_by_mac, get_lan_device_by_ip,
 )
 from app.scheduler import evaluate_schedule_for_target
 from app.scanner import full_scan, fetch_pihole_devices, resolve_mac, resolve_hostname
@@ -392,7 +392,10 @@ async def get_dns_queries_by_ip(request: Request, ip: str):
     client = get_pihole_client()
     if not client:
         return {"ok": False, "error": "Pi-hole not configured"}
-    queries = await client.get_queries(client_ip=ip, limit=100)
+    # Look up hostname so Pi-hole can filter by name (Pi-hole uses rDNS name as client key)
+    lan_device = await get_lan_device_by_ip(ip)
+    hostname = lan_device.get("hostname") if lan_device else None
+    queries = await client.get_queries(client_ip=ip, client_name=hostname, limit=100)
     return {"ok": True, "queries": queries, "client_ip": ip}
 
 
@@ -414,7 +417,8 @@ async def get_dns_queries(target_id: int, request: Request):
             ip = cached.get("ip")
     if not ip:
         return {"ok": False, "error": "No IP address for this target — run a scan first"}
-    queries = await client.get_queries(client_ip=ip, limit=100)
+    hostname = target.get("hostname")
+    queries = await client.get_queries(client_ip=ip, client_name=hostname, limit=100)
     return {"ok": True, "queries": queries, "client_ip": ip}
 
 

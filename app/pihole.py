@@ -107,10 +107,10 @@ class PiHoleClient:
     # ── DNS queries ──────────────────────────────────────────────
 
     async def get_queries(
-        self, client_ip: str | None = None, limit: int = 100
+        self, client_ip: str | None = None, client_name: str | None = None, limit: int = 100
     ) -> list[dict]:
-        # Fetch more than needed so we have enough after filtering
-        fetch_limit = limit * 5 if client_ip else limit
+        # Fetch with a large window — Pi-hole may ignore the client param
+        fetch_limit = limit * 20 if client_ip else limit
         params: dict[str, Any] = {"length": fetch_limit}
         if client_ip:
             params["client"] = client_ip
@@ -118,14 +118,19 @@ class PiHoleClient:
         data = resp.json()
         queries = data.get("queries", data if isinstance(data, list) else [])
 
-        # Pi-hole may ignore the client param — filter ourselves
+        # Pi-hole may ignore the client param — filter ourselves by IP or hostname
         if client_ip and queries:
+            name_lower = client_name.lower() if client_name else None
             def _match(q):
                 c = q.get("client")
                 if isinstance(c, dict):
-                    return c.get("ip") == client_ip
+                    if c.get("ip") == client_ip:
+                        return True
+                    if name_lower and c.get("name", "").lower() == name_lower:
+                        return True
+                    return False
                 if isinstance(c, str):
-                    return c == client_ip
+                    return c == client_ip or (name_lower and c.lower() == name_lower)
                 return q.get("client_ip") == client_ip
             queries = [q for q in queries if _match(q)][:limit]
 
