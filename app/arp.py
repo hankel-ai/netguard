@@ -235,18 +235,68 @@ class BlockerManager:
         self._blockers: dict[int, TargetBlocker] = {}
         self._lock = threading.Lock()
 
+    def _resolve_gateway_mac_from_cache(self) -> str | None:
+        """Try to read gateway MAC from system ARP cache or /proc/net/arp."""
+        # First, ping the gateway to populate the ARP cache
+        try:
+            subprocess.run(
+                ["ping", "-c", "1", "-W", "2", self.gateway_ip],
+                capture_output=True, timeout=5,
+            )
+        except Exception:
+            pass
+        # Try /proc/net/arp
+        try:
+            with open("/proc/net/arp") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[0] == self.gateway_ip:
+                        mac = parts[3].lower()
+                        if mac != "00:00:00:00:00:00":
+                            return mac
+        except FileNotFoundError:
+            pass
+        # Try `ip neigh`
+        try:
+            result = subprocess.run(
+                ["ip", "neigh", "show", self.gateway_ip],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split()
+                if "lladdr" in parts:
+                    idx = parts.index("lladdr")
+                    if idx + 1 < len(parts):
+                        return parts[idx + 1].lower()
+        except Exception:
+            pass
+        return None
+
     def init(self):
         """Discover gateway (run once at startup, in a thread)."""
         conf.verb = 0
-        # Gateway MAC
-        ans, _ = srp(
-            Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=self.gateway_ip),
-            timeout=3, iface=self.interface,
-        )
-        if not ans:
-            raise RuntimeError(f"Could not resolve gateway MAC for {self.gateway_ip}")
-        self.gateway_mac = ans[0][1].hwsrc.lower()
-        logger.info("Gateway MAC: %s", self.gateway_mac)
+        import time
+
+        # Try system ARP cache first (faster, doesn't need raw sockets)
+        self.gateway_mac = self._resolve_gateway_mac_from_cache()
+        if self.gateway_mac:
+            logger.info("Gateway MAC (from cache): %s", self.gateway_mac)
+        else:
+            # Fall back to scapy ARP with retries
+            ans = None
+            for attempt in range(1, 6):
+                ans, _ = srp(
+                    Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=self.gateway_ip),
+                    timeout=3 + attempt, iface=self.interface,
+                )
+                if ans:
+                    break
+                logger.warning("Gateway ARP attempt %d/5 failed, retrying in %ds...", attempt, attempt * 2)
+                time.sleep(attempt * 2)
+            if not ans:
+                raise RuntimeError(f"Could not resolve gateway MAC for {self.gateway_ip}")
+            self.gateway_mac = ans[0][1].hwsrc.lower()
+            logger.info("Gateway MAC (from ARP): %s", self.gateway_mac)
 
         # Our MAC
         self.our_mac = get_if_hwaddr(self.interface)

@@ -98,7 +98,9 @@ async def lifespan(app: FastAPI):
             logger.warning("Pi-hole shutdown cleanup failed", exc_info=True)
 
     for t in await get_all_targets():
-        await update_target(t["id"], is_blocking=0, override="none", dns_blocked=0)
+        # Only reset runtime state; preserve override & dns_blocked so they
+        # survive restarts and get restored on next startup.
+        await update_target(t["id"], is_blocking=0)
     await add_log("all unblocked on shutdown", "system")
     await close_db()
     logger.info("NetGuard stopped cleanly")
