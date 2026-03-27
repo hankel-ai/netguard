@@ -201,9 +201,24 @@ class PiHoleClient:
 
     # ── DNS blocking (NetGuard-specific) ─────────────────────────
 
+    async def ensure_blocking_enabled(self) -> None:
+        """Ensure Pi-hole's global blocking is enabled.
+        NetGuard requires global blocking ON — per-client group rules only
+        apply when blocking is enabled. The Default group should have no
+        deny lists so normal devices are unaffected."""
+        try:
+            resp = await self._request("GET", "/api/dns/blocking")
+            data = resp.json()
+            if data.get("blocking") != "enabled":
+                await self._request("POST", "/api/dns/blocking", json={"blocking": True})
+                log.info("Pi-hole global blocking enabled (required for group-based DNS blocking)")
+        except Exception:
+            log.warning("Could not verify/enable Pi-hole blocking status", exc_info=True)
+
     async def ensure_blocking_group(self) -> int:
         """Create the NetGuard-Blocked group and wildcard deny if missing.
         Returns the group ID."""
+        await self.ensure_blocking_enabled()
         groups = await self.get_groups()
         group = next(
             (g for g in groups if g.get("name") == "NetGuard-Blocked"), None
@@ -249,6 +264,14 @@ class PiHoleClient:
     def blocking_group_id(self) -> int | None:
         return self._blocking_group_id
 
+    async def flush_dns_cache(self) -> None:
+        """Flush Pi-hole DNS cache so group changes take effect immediately."""
+        try:
+            await self._request("POST", "/api/action/restartdns")
+            log.info("Pi-hole DNS cache flushed")
+        except Exception:
+            log.warning("Failed to flush Pi-hole DNS cache", exc_info=True)
+
     async def dns_block_device(self, ip: str) -> None:
         """Block all DNS resolution for a device."""
         if self._blocking_group_id is None:
@@ -258,6 +281,7 @@ class PiHoleClient:
             [self._blocking_group_id],
             f"Blocked by NetGuard",
         )
+        await self.flush_dns_cache()
         log.info("DNS-blocked device %s", ip)
 
     async def dns_unblock_device(self, ip: str) -> None:
@@ -267,6 +291,7 @@ class PiHoleClient:
         except httpx.HTTPStatusError:
             # Client entry may not exist — reassign to default group
             await self.add_or_update_client(ip, [0])
+        await self.flush_dns_cache()
         log.info("DNS-unblocked device %s", ip)
 
 
