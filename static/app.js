@@ -171,8 +171,12 @@ function renderTargetCard(t) {
         trafficHtml = '<div class="traffic-stats dim">Monitoring... waiting for data</div>';
     }
 
-    // Status badges (ARP + optional DNS)
-    let badgesHtml = `<div class="status-badge ${statusClass}"><span class="dot"></span> ${statusText}</div>`;
+    // Status badges (online + ARP block + optional DNS)
+    const online = t.is_online;
+    const onlineClass = online ? 'online' : 'offline';
+    const onlineText = online ? 'ONLINE' : 'OFFLINE';
+    let badgesHtml = `<div class="status-badge ${onlineClass}"><span class="dot"></span> ${onlineText}</div>`;
+    badgesHtml += `<div class="status-badge ${statusClass}"><span class="dot"></span> ${statusText}</div>`;
     if (dnsBlocked) {
         badgesHtml += `<div class="status-badge dns-blocked"><span class="dot"></span> DNS</div>`;
     }
@@ -595,13 +599,15 @@ function renderScanList() {
         const name = d.hostname || d.device_type || d.vendor || null;
         const vendorTag = d.vendor && d.vendor !== name ? ` &middot; ${esc(d.vendor)}` : '';
         const typeTag = d.device_type && d.device_type !== name ? ` (${esc(d.device_type)})` : '';
+        const online = d.is_online;
+        const onlineDot = `<span class="online-dot ${online ? 'on' : 'off'}"></span>`;
         const dnsBtn = _piholeConnected && d.ip
             ? `<button class="btn btn-sm btn-secondary" data-dns-ip="${esc(d.ip)}" data-dns-name="${esc(name || d.ip)}">DNS</button>`
             : '';
         return `
         <div class="scan-device ${d.is_target ? 'already-added' : ''}">
             <div class="scan-device-info">
-                <div class="scan-device-name">${name ? esc(name) : '<em>Unknown</em>'}</div>
+                <div class="scan-device-name">${onlineDot}${name ? esc(name) : '<em>Unknown</em>'}</div>
                 <div class="scan-device-details">${esc(d.ip)} &middot; ${esc(d.mac)}${vendorTag}${typeTag}</div>
             </div>
             <div class="scan-device-actions">
@@ -744,6 +750,7 @@ async function init() {
     await Promise.all([checkPiholeStatus(), refreshTargets(), refreshLog(), loadCachedDevices()]);
     setInterval(refreshTargets, 5000);
     setInterval(refreshLog, 15000);
+    setInterval(loadCachedDevices, 30000);
 }
 
 init();

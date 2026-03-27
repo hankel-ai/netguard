@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.database import get_db, get_all_targets, get_schedules_for_target, update_target, add_log
+from app.scanner import arp_ping_ips
 
 logger = logging.getLogger("netguard.scheduler")
 
@@ -104,11 +105,28 @@ async def tick():
         logger.exception("Error in schedule tick")
 
 
+async def arp_refresh():
+    """Ping all target IPs via ARP to keep the cache fresh for online detection."""
+    try:
+        targets = await get_all_targets()
+        ips = []
+        for t in targets:
+            blocker = _manager.get_blocker(t["id"]) if _manager else None
+            ip = blocker.target_ip if blocker else t.get("ip")
+            if ip:
+                ips.append(ip)
+        if ips:
+            await asyncio.to_thread(arp_ping_ips, ips)
+    except Exception:
+        logger.debug("ARP refresh failed", exc_info=True)
+
+
 def init_scheduler(manager):
     global _scheduler, _manager
     _manager = manager
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(tick, "interval", seconds=60, id="schedule_tick")
+    _scheduler.add_job(arp_refresh, "interval", seconds=30, id="arp_refresh")
     _scheduler.start()
     logger.info("Scheduler started (60s interval)")
 

@@ -14,6 +14,40 @@ from app.oui import lookup_vendor
 logger = logging.getLogger("netguard.scanner")
 
 
+def get_online_ips() -> set[str]:
+    """Read /proc/net/arp for IPs with valid MAC entries (works even if ping blocked)."""
+    online = set()
+    try:
+        with open("/proc/net/arp", "r") as f:
+            for line in f.readlines()[1:]:
+                parts = line.split()
+                if len(parts) >= 6 and parts[2] != "0x0":
+                    mac = parts[3].lower()
+                    if mac != "00:00:00:00:00:00":
+                        online.add(parts[0])
+    except Exception:
+        pass
+    return online
+
+
+def arp_ping_ips(ips: list[str]) -> set[str]:
+    """Send unicast ARP probes to specific IPs and return those that respond."""
+    if not ips:
+        return set()
+    conf.verb = 0
+    alive = set()
+    try:
+        ans, _ = srp(
+            Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=ips),
+            timeout=2, iface=settings.interface,
+        )
+        for sent, recv in ans:
+            alive.add(recv.psrc)
+    except Exception:
+        pass
+    return alive
+
+
 def _ping_sweep(network_prefix: str):
     """Send a fast ping sweep to wake up sleeping devices before ARP scan."""
     try:

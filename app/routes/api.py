@@ -11,7 +11,7 @@ from app.database import (
     upsert_lan_device, get_all_lan_devices, get_lan_device_by_mac, get_lan_device_by_ip,
 )
 from app.scheduler import evaluate_schedule_for_target
-from app.scanner import full_scan, fetch_pihole_devices, resolve_mac, resolve_hostname
+from app.scanner import full_scan, fetch_pihole_devices, resolve_mac, resolve_hostname, get_online_ips, arp_ping_ips
 from app.oui import lookup_vendor
 from app.pihole import get_pihole_client
 
@@ -78,6 +78,8 @@ async def list_targets(request: Request):
     require_auth(request)
     targets = await get_all_targets()
     all_stats = _traffic.get_all_stats() if _traffic else {}
+    # Get online status from ARP cache (instant, no packets)
+    online_ips = await asyncio.to_thread(get_online_ips)
     for t in targets:
         blocker = _manager.get_blocker(t["id"])
         t["is_blocking"] = blocker.is_blocking if blocker else False
@@ -86,6 +88,7 @@ async def list_targets(request: Request):
         t["schedules"] = await get_schedules_for_target(t["id"])
         t["traffic"] = all_stats.get(t["id"])
         t["dns_blocked"] = bool(t.get("dns_blocked"))
+        t["is_online"] = t["target_ip"] in online_ips if t["target_ip"] else False
         # Add vendor info from OUI lookup
         vendor, device_type = lookup_vendor(t["mac"])
         t["vendor"] = vendor
@@ -317,8 +320,10 @@ async def list_lan_devices(request: Request):
     devices = await get_all_lan_devices()
     targets = await get_all_targets()
     known_macs = {t["mac"].lower() for t in targets}
+    online_ips = await asyncio.to_thread(get_online_ips)
     for dev in devices:
         dev["is_target"] = dev["mac"].lower() in known_macs
+        dev["is_online"] = dev["ip"] in online_ips if dev.get("ip") else False
     return devices
 
 
@@ -353,8 +358,10 @@ async def scan_lan(request: Request):
     all_devices = await get_all_lan_devices()
     targets = await get_all_targets()
     known_macs = {t["mac"].lower() for t in targets}
+    online_ips = await asyncio.to_thread(get_online_ips)
     for dev in all_devices:
         dev["is_target"] = dev["mac"].lower() in known_macs
+        dev["is_online"] = dev["ip"] in online_ips if dev.get("ip") else False
     return all_devices
 
 

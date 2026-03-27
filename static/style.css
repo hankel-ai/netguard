@@ -182,6 +182,8 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 
 .status-badge.blocked { background: rgba(233, 69, 96, 0.2); color: var(--red); }
 .status-badge.unblocked { background: rgba(0, 200, 83, 0.2); color: var(--green); }
+.status-badge.online { background: rgba(0, 200, 83, 0.2); color: var(--green); }
+.status-badge.offline { background: rgba(100, 100, 100, 0.2); color: #777; }
 
 .dot {
     width: 8px; height: 8px; border-radius: 50%; display: inline-block;
@@ -189,6 +191,8 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 
 .status-badge.blocked .dot { background: var(--red); box-shadow: 0 0 8px var(--red); }
 .status-badge.unblocked .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.status-badge.online .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.status-badge.offline .dot { background: #555; }
 
 .target-schedule {
     padding: 8px 10px;
@@ -420,7 +424,14 @@ h2 { font-size: 1rem; margin-bottom: 10px; color: var(--text-dim); }
 
 .scan-device:last-child { border-bottom: none; }
 .scan-device.already-added { opacity: 0.5; }
-.scan-device-name { font-weight: 500; font-size: 0.9rem; }
+.scan-device-name { font-weight: 500; font-size: 0.9rem; display: flex; align-items: center; gap: 6px; }
+
+/* Online dot for LAN devices */
+.online-dot {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0;
+}
+.online-dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.online-dot.off { background: #555; }
 .scan-device-details { font-size: 0.8rem; color: var(--text-dim); }
 .scan-device-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 
