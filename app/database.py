@@ -181,6 +181,12 @@ async def get_all_lan_devices() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def clear_lan_devices():
+    db = await get_db()
+    await db.execute("DELETE FROM lan_devices")
+    await db.commit()
+
+
 async def get_lan_device_by_mac(mac: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute("SELECT * FROM lan_devices WHERE mac = ? COLLATE NOCASE", (mac,))

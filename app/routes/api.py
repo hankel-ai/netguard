@@ -9,6 +9,7 @@ from app.database import (
     remove_target as db_remove_target, update_target,
     get_schedules_for_target, get_schedule, add_log, get_db,
     upsert_lan_device, get_all_lan_devices, get_lan_device_by_mac, get_lan_device_by_ip,
+    clear_lan_devices,
 )
 from app.scheduler import evaluate_schedule_for_target
 from app.scanner import full_scan, fetch_pihole_devices, resolve_mac, resolve_hostname, get_online_ips, arp_ping_ips
@@ -328,8 +329,10 @@ async def list_lan_devices(request: Request):
 
 
 @router.post("/scan")
-async def scan_lan(request: Request):
+async def scan_lan(request: Request, rebuild: bool = False):
     require_auth(request)
+    if rebuild:
+        await clear_lan_devices()
     # Run ARP scan and DHCP fetch in parallel
     arp_task = asyncio.to_thread(full_scan)
     dhcp_task = fetch_pihole_devices()

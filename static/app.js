@@ -561,7 +561,9 @@ async function doScan() {
     btn.textContent = 'Scanning...';
     status.textContent = 'Scanning network...';
 
-    const devices = await api('/api/scan', 'POST');
+    const rebuild = document.getElementById('chk-rebuild')?.checked;
+    const url = rebuild ? '/api/scan?rebuild=true' : '/api/scan';
+    const devices = await api(url, 'POST');
     _scanning = false;
     btn.disabled = false;
     btn.textContent = 'Scan Now';
