@@ -104,9 +104,10 @@ function renderTargets() {
     const query = document.getElementById('search-targets').value;
     const list = document.getElementById('targets-list');
 
-    const filtered = _targets.filter(t =>
-        matchesSearch(query, t.hostname, t.target_ip || t.ip, t.mac, t.vendor, t.device_type)
-    );
+    const filtered = _targets.filter(t => {
+        const displayName = t.hostname || t.device_type || t.vendor || 'Unknown Device';
+        return matchesSearch(query, displayName, t.target_ip || t.ip, t.mac, t.vendor, t.device_type);
+    });
 
     if (_targets.length === 0) {
         list.innerHTML = '<div class="card empty">No targets configured. Switch to LAN Devices to scan and add.</div>';
@@ -587,9 +588,10 @@ function renderScanList() {
         return;
     }
 
-    const filtered = _scanResults.filter(d =>
-        matchesSearch(query, d.hostname, d.ip, d.mac, d.vendor, d.device_type)
-    );
+    const filtered = _scanResults.filter(d => {
+        const displayName = d.hostname || d.device_type || d.vendor || 'Unknown';
+        return matchesSearch(query, displayName, d.ip, d.mac, d.vendor, d.device_type);
+    });
 
     if (filtered.length === 0) {
         el.innerHTML = '<div class="card empty">No devices match your search.</div>';

@@ -171,51 +171,62 @@ def _resolve_netbios(ip: str) -> str | None:
     return None
 
 
-def _resolve_mdns(ip: str) -> str | None:
-    """mDNS reverse lookup via avahi-resolve or zeroconf."""
-    # Try avahi-resolve-address first (fast, no import overhead)
-    try:
-        result = subprocess.run(
-            ["avahi-resolve", "-a", ip],
-            capture_output=True, text=True, timeout=3,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            # Output format: "192.168.1.100\tDeviceName.local"
-            parts = result.stdout.strip().split("\t")
-            if len(parts) >= 2:
-                name = parts[1].rstrip(".")
-                # Strip .local suffix for cleaner display
-                if name.lower().endswith(".local"):
-                    name = name[:-6]
-                return name
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+def _mdns_discover() -> dict[str, str]:
+    """Browse mDNS services to collect device names. Returns {ip: hostname}."""
+    from zeroconf import Zeroconf, IPVersion, ServiceBrowser
 
-    # Fallback: zeroconf PTR query
-    try:
-        from zeroconf import Zeroconf, ServiceBrowser
-        # Build reverse pointer name: 100.1.168.192.in-addr.arpa.
-        octets = ip.split(".")
-        ptr_name = ".".join(reversed(octets)) + ".in-addr.arpa."
+    results = {}
 
-        zc = Zeroconf()
-        try:
-            info = zc.cache.entries_with_name(ptr_name)
-            if info:
-                for entry in info:
-                    name = str(entry.alias) if hasattr(entry, "alias") else str(entry)
-                    if name and name.lower().endswith(".local."):
-                        name = name[:-7]
-                    elif name and name.lower().endswith(".local"):
-                        name = name[:-6]
-                    if name:
-                        return name
-        finally:
-            zc.close()
+    class Listener:
+        def add_service(self, zc, type_, name):
+            try:
+                info = zc.get_service_info(type_, name)
+                if info and info.server:
+                    hostname = info.server.rstrip(".")
+                    if hostname.lower().endswith(".local"):
+                        hostname = hostname[:-6]
+                    if hostname:
+                        for addr in info.parsed_addresses():
+                            if ":" not in addr:  # IPv4 only
+                                results.setdefault(addr, hostname)
+            except Exception:
+                pass
+
+        def remove_service(self, *a):
+            pass
+
+        def update_service(self, *a):
+            pass
+
+    services = [
+        "_companion-link._tcp.local.",
+        "_airplay._tcp.local.",
+        "_raop._tcp.local.",
+        "_apple-mobdev2._tcp.local.",
+        "_sleep-proxy._udp.local.",
+        "_homekit._tcp.local.",
+        "_googlecast._tcp.local.",
+        "_http._tcp.local.",
+        "_ipp._tcp.local.",
+        "_smb._tcp.local.",
+        "_spotify-connect._tcp.local.",
+    ]
+
+    try:
+        zc = Zeroconf(ip_version=IPVersion.V4Only)
+        listener = Listener()
+        browsers = []
+        for svc in services:
+            try:
+                browsers.append(ServiceBrowser(zc, svc, listener))
+            except Exception:
+                pass
+        time.sleep(5)
+        zc.close()
     except Exception:
-        pass
+        logger.debug("mDNS discovery failed", exc_info=True)
 
-    return None
+    return results
 
 
 def _ssdp_discover() -> dict[str, str]:
@@ -274,28 +285,29 @@ def _ssdp_discover() -> dict[str, str]:
     return results
 
 
-# Module-level SSDP cache (refreshed each full_scan)
+# Module-level discovery caches (refreshed each full_scan)
 _ssdp_names: dict[str, str] = {}
+_mdns_names: dict[str, str] = {}
 
 
 def resolve_hostname(ip: str) -> str | None:
-    """Try multiple methods to resolve a device name: rDNS -> mDNS -> NetBIOS -> SSDP."""
-    # 1. Reverse DNS
+    """Try multiple methods to resolve a device name."""
+    # 1. Reverse DNS (via Pi-hole dnsmasq — fast, covers DHCP hostnames)
     name = _resolve_rdns(ip)
     if name:
         return name
 
-    # 2. mDNS (Bonjour/Avahi)
-    name = _resolve_mdns(ip)
+    # 2. mDNS service browse (from cached discovery — Apple devices, Chromecast, etc.)
+    name = _mdns_names.get(ip)
     if name:
         return name
 
-    # 3. NetBIOS
+    # 3. NetBIOS (Windows devices)
     name = _resolve_netbios(ip)
     if name:
         return name
 
-    # 4. SSDP/UPnP (from cached discovery)
+    # 4. SSDP/UPnP (from cached discovery — Roku, smart TVs, etc.)
     name = _ssdp_names.get(ip)
     if name:
         return name
@@ -328,11 +340,18 @@ async def fetch_pihole_devices() -> list[dict]:
 
 def full_scan() -> list[dict]:
     """Scan network and resolve hostnames in parallel."""
-    global _ssdp_names
+    global _ssdp_names, _mdns_names
 
     devices = scan_network()
 
-    # Run SSDP discovery once for all devices
+    # Run mDNS and SSDP discovery (broadcast once, cache results)
+    try:
+        _mdns_names = _mdns_discover()
+        logger.info("mDNS discovered %d device names", len(_mdns_names))
+    except Exception:
+        logger.debug("mDNS discovery failed", exc_info=True)
+        _mdns_names = {}
+
     try:
         _ssdp_names = _ssdp_discover()
         logger.info("SSDP discovered %d device names", len(_ssdp_names))

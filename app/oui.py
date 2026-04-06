@@ -284,6 +284,15 @@ OUI_DB: dict[str, tuple[str, str]] = {
 }
 
 
+def _is_private_mac(mac: str) -> bool:
+    """Check if MAC is locally administered (randomized/private Wi-Fi address)."""
+    try:
+        first_byte = int(mac[:2], 16)
+        return bool(first_byte & 0x02)
+    except (ValueError, IndexError):
+        return False
+
+
 def lookup_vendor(mac: str) -> tuple[str | None, str | None]:
     """Look up vendor and device type from MAC address.
 
@@ -293,4 +302,6 @@ def lookup_vendor(mac: str) -> tuple[str | None, str | None]:
     entry = OUI_DB.get(prefix)
     if entry:
         return entry
+    if _is_private_mac(mac):
+        return "Private Address", None
     return None, None
