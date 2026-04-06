@@ -37,10 +37,11 @@ Network device blocker and monitor using ARP spoofing, iptables, and Pi-hole DNS
 
 ## Network
 
-- Gateway: 192.168.1.254
-- Pi/Pi-hole: 192.168.1.20
+- Gateway/Router: 192.168.1.254
+- Pi/Pi-hole: 192.168.1.20 (DHCP server + DNS)
 - Interface: eth0
 - Pi-hole URL: http://192.168.1.20 (no password)
+- NetGuard container runs on same Pi as Pi-hole
 
 ## Build / Run / Test
 

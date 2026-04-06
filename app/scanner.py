@@ -315,7 +315,8 @@ async def fetch_pihole_devices() -> list[dict]:
         for lease in leases:
             mac = (lease.get("hwaddr") or lease.get("mac") or "").lower()
             ip = lease.get("ip") or lease.get("address") or ""
-            hostname = lease.get("name") or lease.get("hostname") or None
+            raw_name = lease.get("name") or lease.get("hostname") or None
+            hostname = raw_name if raw_name and raw_name != "*" else None
             if mac and ip:
                 devices.append({"mac": mac, "ip": ip, "hostname": hostname})
         logger.info("Pi-hole DHCP: %d leases", len(devices))
