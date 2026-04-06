@@ -7,7 +7,7 @@ echo "Stopping netguard..."
 docker compose down
 
 echo "Rebuilding image..."
-docker compose build
+docker compose build --no-cache
 
 echo "Starting netguard..."
 docker compose up
