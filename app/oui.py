@@ -293,10 +293,27 @@ def _is_private_mac(mac: str) -> bool:
         return False
 
 
+# Full IEEE OUI database via mac-vendor-lookup (lazy init)
+_mac_lookup = None
+
+
+def _ieee_lookup(mac: str) -> str | None:
+    """Look up vendor from full IEEE OUI database."""
+    global _mac_lookup
+    try:
+        if _mac_lookup is None:
+            from mac_vendor_lookup import MacLookup
+            _mac_lookup = MacLookup()
+        return _mac_lookup.lookup(mac)
+    except Exception:
+        return None
+
+
 def lookup_vendor(mac: str) -> tuple[str | None, str | None]:
     """Look up vendor and device type from MAC address.
 
     Returns (vendor, device_type) or (None, None) if not found.
+    Checks curated DB first (has device_type hints), then full IEEE DB.
     """
     prefix = mac.lower().strip()[:8]  # "aa:bb:cc"
     entry = OUI_DB.get(prefix)
@@ -304,4 +321,8 @@ def lookup_vendor(mac: str) -> tuple[str | None, str | None]:
         return entry
     if _is_private_mac(mac):
         return "Private Address", None
+    # Fallback: full IEEE OUI database (vendor only, no device_type)
+    vendor = _ieee_lookup(mac)
+    if vendor:
+        return vendor, None
     return None, None
