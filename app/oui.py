@@ -138,6 +138,8 @@ OUI_DB: dict[str, tuple[str, str]] = {
     "84:cc:a8": ("Espressif", "IoT Device (ESP8266)"),
     "bc:dd:c2": ("Espressif", "IoT Device (ESP32)"),
     "c4:4f:33": ("Espressif", "IoT Device (ESP32)"),
+    # FN-LINK (Wi-Fi/BT modules used in IoT devices)
+    "f4:3c:3b": ("FN-LINK", "IoT Device"),
 
     # Raspberry Pi
     "e4:5f:01": ("Raspberry Pi", "Raspberry Pi"),
@@ -295,15 +297,22 @@ def _is_private_mac(mac: str) -> bool:
 
 # Full IEEE OUI database via mac-vendor-lookup (lazy init)
 _mac_lookup = None
+_mac_lookup_updated = False
 
 
 def _ieee_lookup(mac: str) -> str | None:
     """Look up vendor from full IEEE OUI database."""
-    global _mac_lookup
+    global _mac_lookup, _mac_lookup_updated
     try:
         if _mac_lookup is None:
-            from mac_vendor_lookup import MacLookup
-            _mac_lookup = MacLookup()
+            from mac_vendor_lookup import BaseMacLookup
+            _mac_lookup = BaseMacLookup()
+            if not _mac_lookup_updated:
+                try:
+                    _mac_lookup.update_vendors()
+                    _mac_lookup_updated = True
+                except Exception:
+                    pass  # Use bundled DB if update fails
         return _mac_lookup.lookup(mac)
     except Exception:
         return None
