@@ -29,7 +29,7 @@ Network device blocker and monitor using ARP spoofing, iptables, and Pi-hole DNS
 - `app/arp.py` — TargetBlocker (per-device ARP spoof + firewall), BlockerManager
 - `app/pihole.py` — PiHoleClient (Pi-hole v6 API: groups, clients, DNS blocking)
 - `app/routes/api.py` — All REST API endpoints
-- `app/scheduler.py` — Schedule evaluation, 60s tick loop
+- `app/scheduler.py` — Schedule evaluation, 60s tick loop (also expires time-bound overrides)
 - `app/database.py` — SQLite schema and queries
 - `app/scanner.py` — LAN device discovery (ARP scan + DHCP leases)
 - `static/app.js` — Frontend SPA
@@ -48,3 +48,13 @@ Network device blocker and monitor using ARP spoofing, iptables, and Pi-hole DNS
 - `rebuild.sh` — stop, rebuild, start (run on Pi only)
 - `docker compose logs -f` — check logs (on Pi only)
 - No test suite currently
+
+## Override model
+
+`targets.override` is `none` / `block` / `unblock` and tells the scheduler tick to leave the target alone. `targets.override_until` (UTC, "YYYY-MM-DD HH:MM:SS") makes the override time-bound:
+
+- `POST /api/targets/{id}/unblock?hours=N` — UNBLOCK and auto-clear after N hours
+- `POST /api/targets/{id}/unblock` (no hours) — indefinite UNBLOCK override
+- `POST /api/targets/{id}/block` — BLOCK override is always indefinite (clears `override_until`)
+- The 60s scheduler tick calls `clear_expired_overrides()` first; once cleared, the normal schedule re-evaluation re-applies block/unblock as needed.
+- Frontend prompts for hours on UNBLOCK click and renders an "expires in Xh Ym" badge from `override_until`.

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
@@ -167,20 +168,28 @@ async def block_target(target_id: int, request: Request):
     if not blocker:
         return {"ok": False, "error": "Target not found"}
     await blocker.block()
-    await update_target(target_id, is_blocking=1, override="block")
+    await update_target(target_id, is_blocking=1, override="block", override_until=None)
     await add_log("blocked", "manual", target_id=target_id)
     return {"ok": True}
 
 
 @router.post("/targets/{target_id}/unblock")
-async def unblock_target(target_id: int, request: Request):
+async def unblock_target(target_id: int, request: Request, hours: float | None = None):
     require_auth(request)
     blocker = _manager.get_blocker(target_id)
     if not blocker:
         return {"ok": False, "error": "Target not found"}
+    if hours is not None and hours <= 0:
+        return {"ok": False, "error": "hours must be positive"}
     await blocker.unblock()
-    await update_target(target_id, is_blocking=0, override="unblock")
-    await add_log("unblocked", "manual", target_id=target_id)
+    if hours is not None:
+        until_dt = datetime.now(timezone.utc) + timedelta(hours=hours)
+        until_str = until_dt.strftime("%Y-%m-%d %H:%M:%S")
+        await update_target(target_id, is_blocking=0, override="unblock", override_until=until_str)
+        await add_log(f"unblocked ({hours}h override)", "manual", target_id=target_id)
+    else:
+        await update_target(target_id, is_blocking=0, override="unblock", override_until=None)
+        await add_log("unblocked", "manual", target_id=target_id)
     return {"ok": True}
 
 
@@ -190,7 +199,7 @@ async def clear_override(target_id: int, request: Request):
     blocker = _manager.get_blocker(target_id)
     if not blocker:
         return {"ok": False, "error": "Target not found"}
-    await update_target(target_id, override="none")
+    await update_target(target_id, override="none", override_until=None)
     await add_log("override cleared", "manual", target_id=target_id)
     # Re-evaluate schedule
     should_block = await evaluate_schedule_for_target(target_id)

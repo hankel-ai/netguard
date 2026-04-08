@@ -156,6 +156,27 @@ function renderTargetCard(t) {
     const blockPressed = t.override === 'block';
     const unblockPressed = t.override === 'unblock';
 
+    // Override info (label + countdown when override_until is set)
+    let overrideInfoHtml = '';
+    if (hasOverride) {
+        const label = t.override === 'unblock' ? 'UNBLOCK override' :
+                      t.override === 'block' ? 'BLOCK override' : 'Override';
+        let detail = 'indefinite';
+        if (t.override_until) {
+            const until = new Date(t.override_until.replace(' ', 'T') + 'Z');
+            const diffMs = until - Date.now();
+            if (diffMs > 0) {
+                const totalMin = Math.ceil(diffMs / 60000);
+                const h = Math.floor(totalMin / 60);
+                const m = totalMin % 60;
+                detail = h > 0 ? `expires in ${h}h ${m}m` : `expires in ${m}m`;
+            } else {
+                detail = 'expired';
+            }
+        }
+        overrideInfoHtml = `<div class="override-info">\u23F1 ${label} \u2014 ${detail}</div>`;
+    }
+
     const desc = t.description || '';
 
     let trafficHtml = '';
@@ -203,7 +224,7 @@ function renderTargetCard(t) {
             <div class="status-badges">
                 ${badgesHtml}
             </div>
-        </div>${trafficHtml}
+        </div>${trafficHtml}${overrideInfoHtml}
         <div class="${scheduleClass}" data-action="schedule" data-name="${esc(displayName)}">
             ${scheduleSummary
                 ? `<span class="schedule-icon">\u{1F551}</span> ${esc(scheduleSummary)}`
@@ -266,6 +287,21 @@ document.getElementById('targets-list').addEventListener('click', async (e) => {
         await refreshLog();
         await loadCachedDevices();
         return;
+    } else if (action === 'unblock') {
+        const hoursStr = prompt('Unblock for how many hours?\n(Leave blank for indefinite — clears at next BLOCK or CLEAR.)', '2');
+        if (hoursStr === null) return; // cancelled
+        let url = `/api/targets/${id}/unblock`;
+        if (hoursStr.trim() !== '') {
+            const hours = parseFloat(hoursStr);
+            if (!isFinite(hours) || hours <= 0) {
+                alert('Please enter a positive number of hours.');
+                return;
+            }
+            url += `?hours=${encodeURIComponent(hours)}`;
+        }
+        btn.disabled = true;
+        btn.textContent = '...';
+        await api(url, 'POST');
     } else {
         btn.disabled = true;
         btn.textContent = '...';

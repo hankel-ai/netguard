@@ -6,7 +6,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from zoneinfo import ZoneInfo
 
 from app.config import settings
-from app.database import get_db, get_all_targets, get_schedules_for_target, update_target, add_log
+from app.database import (
+    get_db, get_all_targets, get_schedules_for_target, update_target, add_log,
+    clear_expired_overrides,
+)
 from app.scanner import arp_ping_ips
 
 logger = logging.getLogger("netguard.scheduler")
@@ -77,6 +80,12 @@ async def evaluate_schedule_for_target(target_id: int) -> bool:
 async def tick():
     """Called every 60s. Evaluate schedule for each target and apply block/unblock."""
     try:
+        # Clear any expired overrides first so the schedule can take over again
+        expired_ids = await clear_expired_overrides()
+        for tid in expired_ids:
+            await add_log("override expired", "system", target_id=tid)
+            logger.info("Override expired for target %d", tid)
+
         targets = await get_all_targets()
         for target in targets:
             tid = target["id"]

@@ -49,6 +49,7 @@ MIGRATIONS = [
     "ALTER TABLE lan_devices ADD COLUMN device_type TEXT",
     "ALTER TABLE targets ADD COLUMN is_monitoring INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE targets ADD COLUMN dns_blocked INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE targets ADD COLUMN override_until TEXT",
 ]
 
 
@@ -123,6 +124,25 @@ async def update_target(target_id: int, **fields):
     values = list(fields.values()) + [target_id]
     await db.execute(f"UPDATE targets SET {set_clause} WHERE id = ?", values)
     await db.commit()
+
+
+async def clear_expired_overrides() -> list[int]:
+    """Clear any override whose override_until has elapsed. Returns affected target ids."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT id FROM targets WHERE override != 'none' AND override_until IS NOT NULL "
+        "AND override_until <= strftime('%Y-%m-%d %H:%M:%S', 'now')"
+    )
+    rows = await cursor.fetchall()
+    ids = [r["id"] for r in rows]
+    if ids:
+        placeholders = ",".join("?" * len(ids))
+        await db.execute(
+            f"UPDATE targets SET override = 'none', override_until = NULL WHERE id IN ({placeholders})",
+            ids,
+        )
+        await db.commit()
+    return ids
 
 
 # --- Schedules ---
