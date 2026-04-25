@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     pihole_url: str | None = None
     pihole_password: str | None = None
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()
