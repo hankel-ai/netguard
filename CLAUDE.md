@@ -21,7 +21,7 @@ Network device blocker and monitor using ARP spoofing, iptables, and Pi-hole DNS
 - **DNS Blocking:** Pi-hole v6 REST API (group-based, wildcard deny regex)
 - **Database:** SQLite (aiosqlite), stored at `/data/netguard.db`
 - **Frontend:** Vanilla JS (`static/app.js`), HTML templates (Jinja2)
-- **Auth:** None in-app. Access is gated upstream by Authentik ForwardAuth via lanward (`netguard.hankel.ai`). The container must not be exposed without that ingress in front of it — there is no other access control.
+- **Auth:** No login in the app. Access is gated upstream by Authentik ForwardAuth via lanward (`netguard.hankel.ai`). As a defense-in-depth check, `app/main.py` registers an HTTP middleware that returns 403 to any request missing the `X-authentik-username` header — so even if someone reaches the container directly on the LAN (the Pi is `network_mode: host`), they hit a 403 wall. The middleware is bypassed by setting `DISABLE_AUTHENTIK_GATE=1` (only for local dev with no ingress in front).
 
 ## Key Files
 

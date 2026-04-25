@@ -1,8 +1,10 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.arp import BlockerManager
@@ -107,6 +109,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="NetGuard", lifespan=lifespan)
+
+
+# Defense-in-depth: refuse requests that didn't traverse the Authentik outpost.
+# Set DISABLE_AUTHENTIK_GATE=1 only for local dev where there's no ingress in front.
+if os.environ.get("DISABLE_AUTHENTIK_GATE") != "1":
+
+    @app.middleware("http")
+    async def require_authentik_headers(request: Request, call_next):
+        if not request.headers.get("x-authentik-username"):
+            return PlainTextResponse(
+                "Forbidden — netguard is only reachable via https://netguard.hankel.ai",
+                status_code=403,
+            )
+        return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.include_router(api_router)
 app.include_router(pages_router)

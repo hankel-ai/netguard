@@ -298,7 +298,7 @@ Overnight spans (start > end) are handled correctly. Rules can be individually e
 
 ## API
 
-Authentication is handled at the ingress layer by Authentik ForwardAuth (lanward-managed); netguard itself has no auth and is expected to be reachable only through `https://netguard.hankel.ai`. Do NOT expose the container port directly to the LAN/internet without Authentik in front of it.
+Authentication is handled at the ingress layer by Authentik ForwardAuth (lanward-managed); netguard itself has no login. As a defense-in-depth check, `app/main.py` rejects any request that doesn't carry the `X-authentik-username` header (set by the Authentik outpost via Traefik), so direct LAN access to the container returns 403. To run locally without an ingress in front, set `DISABLE_AUTHENTIK_GATE=1`.
 
 | Method | Path | Description |
 |--------|------|-------------|
