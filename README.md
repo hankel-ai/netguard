@@ -115,7 +115,6 @@ Edit `.env` with your values:
 ```
 GATEWAY_IP=192.168.1.254       # your router's IP
 INTERFACE=eth0                 # host's network interface
-AUTH_PASSWORD=changeme         # web UI password
 ARP_INTERVAL=2.0               # seconds between spoof packets
 DB_PATH=/data/netguard.db      # SQLite path (inside container)
 TZ=America/New_York            # timezone for schedules
@@ -198,7 +197,6 @@ Example `.env`:
 ```
 GATEWAY_IP=192.168.1.254
 INTERFACE=eth0
-AUTH_PASSWORD=changeme
 ARP_INTERVAL=2.0
 DB_PATH=/data/netguard.db
 TZ=America/New_York
@@ -300,11 +298,10 @@ Overnight spans (start > end) are handled correctly. Rules can be individually e
 
 ## API
 
-All endpoints (except login) require authentication via session cookie.
+Authentication is handled at the ingress layer by Authentik ForwardAuth (lanward-managed); netguard itself has no auth and is expected to be reachable only through `https://netguard.hankel.ai`. Do NOT expose the container port directly to the LAN/internet without Authentik in front of it.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/login` | Authenticate, sets session cookie |
 | GET | `/api/targets` | List all targets with status and schedules |
 | POST | `/api/targets` | Add target `{ip, mac?, hostname?}` |
 | DELETE | `/api/targets/{id}` | Remove target (unblocks first) |

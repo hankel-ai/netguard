@@ -1,10 +1,9 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from app.auth import require_auth, check_password, create_session_cookie, COOKIE_NAME
 from app.database import (
     get_all_targets, get_target, get_target_by_mac, add_target as db_add_target,
     remove_target as db_remove_target, update_target,
@@ -35,10 +34,6 @@ def set_traffic_monitor(monitor):
 
 # --- Models ---
 
-class LoginRequest(BaseModel):
-    password: str
-
-
 class AddTargetRequest(BaseModel):
     ip: str
     mac: str | None = None
@@ -62,22 +57,10 @@ class ScheduleUpdate(BaseModel):
     end_time: str | None = None
 
 
-# --- Auth ---
-
-@router.post("/login")
-async def login(body: LoginRequest, response: Response):
-    if not check_password(body.password):
-        return {"ok": False, "error": "Wrong password"}
-    cookie = create_session_cookie()
-    response.set_cookie(COOKIE_NAME, cookie, max_age=86400, httponly=True, samesite="lax")
-    return {"ok": True}
-
-
 # --- Targets ---
 
 @router.get("/targets")
 async def list_targets(request: Request):
-    require_auth(request)
     targets = await get_all_targets()
     all_stats = _traffic.get_all_stats() if _traffic else {}
     # Get online status from ARP cache (instant, no packets)
@@ -100,7 +83,6 @@ async def list_targets(request: Request):
 
 @router.post("/targets")
 async def add_target(body: AddTargetRequest, request: Request):
-    require_auth(request)
     mac = body.mac
     hostname = body.hostname
     # If no MAC provided, resolve it from the IP via ARP
@@ -137,7 +119,6 @@ async def add_target(body: AddTargetRequest, request: Request):
 
 @router.delete("/targets/{target_id}")
 async def delete_target(target_id: int, request: Request):
-    require_auth(request)
     target = await get_target(target_id)
     if not target:
         return {"ok": False, "error": "Not found"}
@@ -163,7 +144,6 @@ async def delete_target(target_id: int, request: Request):
 
 @router.post("/targets/{target_id}/block")
 async def block_target(target_id: int, request: Request):
-    require_auth(request)
     blocker = _manager.get_blocker(target_id)
     if not blocker:
         return {"ok": False, "error": "Target not found"}
@@ -175,7 +155,6 @@ async def block_target(target_id: int, request: Request):
 
 @router.post("/targets/{target_id}/unblock")
 async def unblock_target(target_id: int, request: Request, hours: float | None = None):
-    require_auth(request)
     blocker = _manager.get_blocker(target_id)
     if not blocker:
         return {"ok": False, "error": "Target not found"}
@@ -195,7 +174,6 @@ async def unblock_target(target_id: int, request: Request, hours: float | None =
 
 @router.post("/targets/{target_id}/clear-override")
 async def clear_override(target_id: int, request: Request):
-    require_auth(request)
     blocker = _manager.get_blocker(target_id)
     if not blocker:
         return {"ok": False, "error": "Target not found"}
@@ -216,7 +194,6 @@ async def clear_override(target_id: int, request: Request):
 
 @router.post("/targets/{target_id}/monitor")
 async def start_monitor(target_id: int, request: Request):
-    require_auth(request)
     blocker = _manager.get_blocker(target_id)
     if not blocker:
         return {"ok": False, "error": "Target not found"}
@@ -231,7 +208,6 @@ async def start_monitor(target_id: int, request: Request):
 
 @router.post("/targets/{target_id}/unmonitor")
 async def stop_monitor(target_id: int, request: Request):
-    require_auth(request)
     blocker = _manager.get_blocker(target_id)
     if not blocker:
         return {"ok": False, "error": "Target not found"}
@@ -244,7 +220,6 @@ async def stop_monitor(target_id: int, request: Request):
 
 @router.patch("/targets/{target_id}/description")
 async def set_description(target_id: int, body: DescriptionUpdate, request: Request):
-    require_auth(request)
     target = await get_target(target_id)
     if not target:
         return {"ok": False, "error": "Not found"}
@@ -256,13 +231,11 @@ async def set_description(target_id: int, body: DescriptionUpdate, request: Requ
 
 @router.get("/targets/{target_id}/schedules")
 async def list_schedules(target_id: int, request: Request):
-    require_auth(request)
     return await get_schedules_for_target(target_id)
 
 
 @router.post("/targets/{target_id}/schedules")
 async def create_schedule(target_id: int, body: ScheduleCreate, request: Request):
-    require_auth(request)
     db = await get_db()
     cursor = await db.execute(
         "INSERT INTO schedule_rules (target_id, day_of_week, start_time, end_time) VALUES (?, ?, ?, ?)",
@@ -278,7 +251,6 @@ async def create_schedule(target_id: int, body: ScheduleCreate, request: Request
 
 @router.put("/schedules/{rule_id}")
 async def update_schedule(rule_id: int, body: ScheduleUpdate, request: Request):
-    require_auth(request)
     db = await get_db()
     fields, values = [], []
     if body.day_of_week is not None:
@@ -300,7 +272,6 @@ async def update_schedule(rule_id: int, body: ScheduleUpdate, request: Request):
 
 @router.delete("/schedules/{rule_id}")
 async def delete_schedule(rule_id: int, request: Request):
-    require_auth(request)
     rule = await get_schedule(rule_id)
     db = await get_db()
     await db.execute("DELETE FROM schedule_rules WHERE id = ?", (rule_id,))
@@ -312,7 +283,6 @@ async def delete_schedule(rule_id: int, request: Request):
 
 @router.patch("/schedules/{rule_id}/toggle")
 async def toggle_schedule(rule_id: int, request: Request):
-    require_auth(request)
     db = await get_db()
     await db.execute(
         "UPDATE schedule_rules SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END WHERE id = ?",
@@ -326,7 +296,6 @@ async def toggle_schedule(rule_id: int, request: Request):
 
 @router.get("/lan-devices")
 async def list_lan_devices(request: Request):
-    require_auth(request)
     devices = await get_all_lan_devices()
     targets = await get_all_targets()
     known_macs = {t["mac"].lower() for t in targets}
@@ -339,7 +308,6 @@ async def list_lan_devices(request: Request):
 
 @router.post("/scan")
 async def scan_lan(request: Request, rebuild: bool = False):
-    require_auth(request)
     if rebuild:
         await clear_lan_devices()
     # Run ARP scan and DHCP fetch in parallel
@@ -381,7 +349,6 @@ async def scan_lan(request: Request, rebuild: bool = False):
 
 @router.get("/log")
 async def get_log(request: Request):
-    require_auth(request)
     db = await get_db()
     cursor = await db.execute(
         "SELECT l.*, t.hostname, t.mac as target_mac FROM audit_log l "
@@ -396,7 +363,6 @@ async def get_log(request: Request):
 
 @router.get("/pihole/status")
 async def pihole_status(request: Request):
-    require_auth(request)
     client = get_pihole_client()
     if not client:
         return {"configured": False, "connected": False}
@@ -407,7 +373,6 @@ async def pihole_status(request: Request):
 @router.get("/dns-queries")
 async def get_dns_queries_by_ip(request: Request, ip: str):
     """DNS queries for any device by IP (no target required)."""
-    require_auth(request)
     client = get_pihole_client()
     if not client:
         return {"ok": False, "error": "Pi-hole not configured"}
@@ -420,7 +385,6 @@ async def get_dns_queries_by_ip(request: Request, ip: str):
 
 @router.get("/targets/{target_id}/dns-queries")
 async def get_dns_queries(target_id: int, request: Request):
-    require_auth(request)
     client = get_pihole_client()
     if not client:
         return {"ok": False, "error": "Pi-hole not configured"}
@@ -443,7 +407,6 @@ async def get_dns_queries(target_id: int, request: Request):
 
 @router.post("/targets/{target_id}/dns-block")
 async def dns_block_target(target_id: int, request: Request):
-    require_auth(request)
     client = get_pihole_client()
     if not client:
         return {"ok": False, "error": "Pi-hole not configured"}
@@ -462,7 +425,6 @@ async def dns_block_target(target_id: int, request: Request):
 
 @router.post("/targets/{target_id}/dns-unblock")
 async def dns_unblock_target(target_id: int, request: Request):
-    require_auth(request)
     client = get_pihole_client()
     if not client:
         return {"ok": False, "error": "Pi-hole not configured"}

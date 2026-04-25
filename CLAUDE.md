@@ -21,7 +21,7 @@ Network device blocker and monitor using ARP spoofing, iptables, and Pi-hole DNS
 - **DNS Blocking:** Pi-hole v6 REST API (group-based, wildcard deny regex)
 - **Database:** SQLite (aiosqlite), stored at `/data/netguard.db`
 - **Frontend:** Vanilla JS (`static/app.js`), HTML templates (Jinja2)
-- **Auth:** Simple password auth with session cookies
+- **Auth:** None in-app. Access is gated upstream by Authentik ForwardAuth via lanward (`netguard.hankel.ai`). The container must not be exposed without that ingress in front of it — there is no other access control.
 
 ## Key Files
 
