@@ -776,10 +776,11 @@ async function refreshLog() {
 
     list.innerHTML = logs.slice(0, 30).map(l => {
         const d = new Date(l.timestamp + 'Z');
+        const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
         const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
         const who = l.hostname || l.target_mac || '';
         const label = who ? ` [${who}]` : '';
-        return `<div class="log-item"><span class="log-time">${time}</span>${label} \u2014 ${l.action} (${l.source})</div>`;
+        return `<div class="log-item"><span class="log-time">${date} ${time}</span>${label} \u2014 ${l.action} (${l.source})</div>`;
     }).join('');
 }
 
